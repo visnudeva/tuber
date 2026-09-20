@@ -176,7 +176,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if paused {
 					m.status = "paused"
 				} else {
-					m.status = "playing"
+					m.status = "downloading"
 				}
 				m.snaps = m.eng.Snapshots()
 			}
@@ -314,15 +314,15 @@ func formatRow(s engine.Snapshot) string {
 func padStatus(st engine.Status) string {
 	switch st {
 	case engine.StatusDone:
-		return okStyle.Render(fmt.Sprintf("%-8s", "done"))
+		return okStyle.Render(fmt.Sprintf("%-11s", "done"))
 	case engine.StatusPaused:
-		return warnStyle.Render(fmt.Sprintf("%-8s", "paused"))
+		return warnStyle.Render(fmt.Sprintf("%-11s", "paused"))
 	case engine.StatusVerifying:
-		return warnStyle.Render(fmt.Sprintf("%-8s", "verify"))
+		return warnStyle.Render(fmt.Sprintf("%-11s", "verifying"))
 	case engine.StatusFetching:
-		return dimStyle.Render(fmt.Sprintf("%-8s", "meta"))
+		return dimStyle.Render(fmt.Sprintf("%-11s", "meta"))
 	default:
-		return okStyle.Render(fmt.Sprintf("%-8s", "active"))
+		return okStyle.Render(fmt.Sprintf("%-11s", "downloading"))
 	}
 }
 
