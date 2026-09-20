@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=tuber
+GenericName=BitTorrent Client
+Comment=Light terminal BitTorrent client
+Exec=tuber-open %U
+Icon=application-x-bittorrent
+Terminal=false
+Categories=Network;FileTransfer;P2P;
+MimeType=x-scheme-handler/magnet;application/x-bittorrent;
+Keywords=torrent;magnet;bittorrent;download;
+StartupNotify=false

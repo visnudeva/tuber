@@ -1,0 +1,18 @@
+#!/bin/sh
+# Open tuber in a terminal (needed for TUI + xdg-open / magnet clicks).
+# If tuber is already running, hand off magnets there — no second window.
+BIN="${TUBER_BIN:-tuber}"
+
+if command -v "$BIN" >/dev/null 2>&1 || [ -x "$BIN" ]; then
+  if "$BIN" --handoff "$@" >/dev/null 2>&1; then
+    exit 0
+  fi
+fi
+
+if command -v kitty >/dev/null 2>&1; then
+  exec kitty --title tuber -d "${HOME}/Downloads/tuber" "$BIN" "$@"
+fi
+if command -v xdg-terminal-exec >/dev/null 2>&1; then
+  exec xdg-terminal-exec "$BIN" "$@"
+fi
+exec "$BIN" "$@"
