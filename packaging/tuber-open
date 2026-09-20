@@ -1,6 +1,6 @@
 #!/bin/sh
 # Open tuber in a terminal (needed for TUI + xdg-open / magnet clicks).
-# Magnets hand off to a running session; a bare launch opens/focuses the TUI.
+# Magnets hand off to a running session; a bare launch always opens the TUI.
 BIN="${TUBER_BIN:-tuber}"
 
 if [ "$#" -gt 0 ]; then
@@ -11,9 +11,9 @@ if [ "$#" -gt 0 ]; then
   fi
 fi
 
-# Prefer foot on SweetPotatOs; kitty elsewhere.
+# foot: trailing args are the command; -e is ignored (xterm compat). Match Spore's style.
 if command -v foot >/dev/null 2>&1; then
-  exec foot -T tuber -a tuber "$BIN" "$@"
+  exec foot -T tuber -a tuber -e "$BIN" "$@"
 fi
 if command -v kitty >/dev/null 2>&1; then
   exec kitty --title tuber -d "${HOME}/Downloads/tuber" "$BIN" "$@"

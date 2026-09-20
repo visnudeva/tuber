@@ -37,20 +37,13 @@ func main() {
 	// Magnets / files: always prefer the open session.
 	if len(args) > 0 {
 		if err := ipc.Handoff(args); err == nil {
-			if focusTuberWindow() {
-				os.Exit(0)
-			}
-			fmt.Fprintln(os.Stderr, "tuber: added to the running session (could not focus its window)")
+			_ = focusTuberWindow()
 			os.Exit(0)
 		}
-	} else if ipc.Alive() {
-		fmt.Fprintln(os.Stderr, "tuber is already running — focusing that window")
-		if focusTuberWindow() {
-			os.Exit(0)
-		}
-		fmt.Fprintln(os.Stderr, "tuber: running session has no visible window; starting a new one")
-		// Fall through and take over the socket (Listen removes the path).
 	}
+	// Empty launch always opens a TUI. Do not "focus and exit" — on Swirl/Sway,
+	// swaymsg can report success even when no window matched, which made
+	// `tuber` in a terminal appear to do nothing on SweetPotatOs.
 
 	eng, err := engine.New(*dataDir)
 	if err != nil {
@@ -71,21 +64,6 @@ func main() {
 		os.Exit(0)
 	}()
 	defer shutdown()
-
-	if sess, err := engine.LoadSession(); err == nil {
-		if sess.DataDir != "" && *dataDir == defaultDir {
-			// keep flag override; otherwise session dir is informational
-		}
-		eng.RestoreSession(sess)
-	}
-	eng.RestoreIncompleteFromDisk()
-
-	for _, arg := range args {
-		if _, err := eng.Add(arg); err != nil {
-			fmt.Fprintf(os.Stderr, "tuber: add %q: %v\n", arg, err)
-		}
-	}
-	_ = eng.Persist()
 
 	notes := &ui.Notes{}
 	srv, err := ipc.Listen(func(addArgs []string) error {
@@ -114,21 +92,31 @@ func main() {
 	if err != nil {
 		if len(args) > 0 {
 			if err := ipc.Handoff(args); err == nil {
-				if focusTuberWindow() {
-					os.Exit(0)
-				}
-				fmt.Fprintln(os.Stderr, "tuber: added to the running session")
+				_ = focusTuberWindow()
 				os.Exit(0)
 			}
-		}
-		if ipc.Alive() && focusTuberWindow() {
-			os.Exit(0)
 		}
 		fatalWait("tuber: ipc: %v", err)
 	}
 	defer srv.Close()
 
 	p := tea.NewProgram(ui.New(eng, notes), tea.WithAltScreen())
+
+	// Restore after the UI is up so a slow verify/session never looks like a hang.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		if sess, err := engine.LoadSession(); err == nil {
+			eng.RestoreSession(sess)
+		}
+		eng.RestoreIncompleteFromDisk()
+		for _, arg := range args {
+			if _, err := eng.Add(arg); err != nil {
+				notes.Set(err.Error())
+			}
+		}
+		_ = eng.Persist()
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fatalWait("tuber: %v", err)
 	}
@@ -142,14 +130,14 @@ func shortID(id string) string {
 }
 
 func focusTuberWindow() bool {
-	// Swirl / Sway (SweetPotatOs)
-	if err := exec.Command("swaymsg", `[title="tuber"]`, "focus").Run(); err == nil {
+	out, err := exec.Command("swaymsg", `[title="tuber"]`, "focus").CombinedOutput()
+	if err == nil && !strings.Contains(strings.ToLower(string(out)), "no matching") {
 		return true
 	}
-	if err := exec.Command("swaymsg", `[app_id="tuber"]`, "focus").Run(); err == nil {
+	out, err = exec.Command("swaymsg", `[app_id="tuber"]`, "focus").CombinedOutput()
+	if err == nil && !strings.Contains(strings.ToLower(string(out)), "no matching") {
 		return true
 	}
-	// Hyprland
 	if err := exec.Command("hyprctl", "dispatch", "focuswindow", "title:tuber").Run(); err == nil {
 		return true
 	}
@@ -161,7 +149,6 @@ func focusTuberWindow() bool {
 
 func fatalWait(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	// Keep foot/kitty open long enough to read the error when launched via -e.
 	if fi, err := os.Stderr.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
 		fmt.Fprintln(os.Stderr, "press enter to close")
 		_, _ = fmt.Scanln()
