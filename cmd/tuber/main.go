@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,15 +34,21 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Prefer an existing instance: magnets / .torrents go there, no second TUI.
-	if err := ipc.Handoff(args); err == nil {
+	// Magnets / files: always prefer the open session.
+	if len(args) > 0 {
+		if err := ipc.Handoff(args); err == nil {
+			focusTuberWindow()
+			os.Exit(0)
+		}
+	} else if ipc.Alive() {
+		// Interactive open while already running: raise that window (don't flash a second TUI).
+		focusTuberWindow()
 		os.Exit(0)
 	}
 
 	eng, err := engine.New(*dataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tuber: %v\n", err)
-		os.Exit(1)
+		fatalWait("tuber: %v", err)
 	}
 
 	shutdown := func() {
@@ -98,19 +106,23 @@ func main() {
 		return nil
 	})
 	if err != nil {
-		// Rare race: another primary appeared — hand off and exit.
-		if err := ipc.Handoff(args); err == nil {
+		if len(args) > 0 {
+			if err := ipc.Handoff(args); err == nil {
+				focusTuberWindow()
+				os.Exit(0)
+			}
+		}
+		if ipc.Alive() {
+			focusTuberWindow()
 			os.Exit(0)
 		}
-		fmt.Fprintf(os.Stderr, "tuber: ipc: %v\n", err)
-		os.Exit(1)
+		fatalWait("tuber: ipc: %v", err)
 	}
 	defer srv.Close()
 
 	p := tea.NewProgram(ui.New(eng, notes), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tuber: %v\n", err)
-		os.Exit(1)
+		fatalWait("tuber: %v", err)
 	}
 }
 
@@ -119,4 +131,22 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:8]
+}
+
+func focusTuberWindow() {
+	// Swirl / Sway (SweetPotatOs) and Hyprland — best-effort.
+	_ = exec.Command("swaymsg", `[title="tuber"]`, "focus").Run()
+	_ = exec.Command("hyprctl", "dispatch", "focuswindow", "title:tuber").Run()
+}
+
+func fatalWait(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	// Keep foot/kitty open long enough to read the error when launched via -e.
+	if fi, err := os.Stderr.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+		fmt.Fprintln(os.Stderr, "press enter to close")
+		_, _ = fmt.Scanln()
+	} else {
+		time.Sleep(3 * time.Second)
+	}
+	os.Exit(1)
 }
