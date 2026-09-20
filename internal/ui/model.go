@@ -264,7 +264,7 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	} else {
 		b.WriteString(headerStyle.Render(fmt.Sprintf("  %-6s  %-8s  %7s  %8s  %8s  %6s  %s",
-			"done", "status", "size", "↓", "↑", "peers", "name")))
+			"done", "status", "size", "down", "up", "peers", "name")))
 		b.WriteString("\n")
 		for i, s := range m.snaps {
 			line := formatRow(s)
