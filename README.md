@@ -36,9 +36,7 @@ tuber -dir ~/Downloads/tuber 'magnet:?xt=urn:btih:…'
 
 Downloads default to `~/Downloads/tuber`. Open magnets are restored from `~/.config/tuber/session.json` on the next launch.
 
-### Magnet links (desktop)
-
-Only one tuber runs at a time. Further magnet clicks hand off to the open session — no second window.
+### Magnet links
 
 ```bash
 cp packaging/tuber-open ~/.local/bin/
