@@ -37,13 +37,19 @@ func main() {
 	// Magnets / files: always prefer the open session.
 	if len(args) > 0 {
 		if err := ipc.Handoff(args); err == nil {
-			focusTuberWindow()
+			if focusTuberWindow() {
+				os.Exit(0)
+			}
+			fmt.Fprintln(os.Stderr, "tuber: added to the running session (could not focus its window)")
 			os.Exit(0)
 		}
 	} else if ipc.Alive() {
-		// Interactive open while already running: raise that window (don't flash a second TUI).
-		focusTuberWindow()
-		os.Exit(0)
+		fmt.Fprintln(os.Stderr, "tuber is already running — focusing that window")
+		if focusTuberWindow() {
+			os.Exit(0)
+		}
+		fmt.Fprintln(os.Stderr, "tuber: running session has no visible window; starting a new one")
+		// Fall through and take over the socket (Listen removes the path).
 	}
 
 	eng, err := engine.New(*dataDir)
@@ -108,12 +114,14 @@ func main() {
 	if err != nil {
 		if len(args) > 0 {
 			if err := ipc.Handoff(args); err == nil {
-				focusTuberWindow()
+				if focusTuberWindow() {
+					os.Exit(0)
+				}
+				fmt.Fprintln(os.Stderr, "tuber: added to the running session")
 				os.Exit(0)
 			}
 		}
-		if ipc.Alive() {
-			focusTuberWindow()
+		if ipc.Alive() && focusTuberWindow() {
 			os.Exit(0)
 		}
 		fatalWait("tuber: ipc: %v", err)
@@ -133,10 +141,22 @@ func shortID(id string) string {
 	return id[:8]
 }
 
-func focusTuberWindow() {
-	// Swirl / Sway (SweetPotatOs) and Hyprland — best-effort.
-	_ = exec.Command("swaymsg", `[title="tuber"]`, "focus").Run()
-	_ = exec.Command("hyprctl", "dispatch", "focuswindow", "title:tuber").Run()
+func focusTuberWindow() bool {
+	// Swirl / Sway (SweetPotatOs)
+	if err := exec.Command("swaymsg", `[title="tuber"]`, "focus").Run(); err == nil {
+		return true
+	}
+	if err := exec.Command("swaymsg", `[app_id="tuber"]`, "focus").Run(); err == nil {
+		return true
+	}
+	// Hyprland
+	if err := exec.Command("hyprctl", "dispatch", "focuswindow", "title:tuber").Run(); err == nil {
+		return true
+	}
+	if err := exec.Command("hyprctl", "dispatch", "focuswindow", "class:tuber").Run(); err == nil {
+		return true
+	}
+	return false
 }
 
 func fatalWait(format string, args ...any) {
