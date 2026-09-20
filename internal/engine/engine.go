@@ -331,6 +331,7 @@ func (e *Engine) Delete(id string, removeFiles bool) error {
 
 	it.t.Drop()
 	delete(e.items, id)
+	forgetTorrentState(e.dataDir, id)
 	e.persistLocked()
 
 	if removeFiles {
@@ -501,7 +502,8 @@ func (e *Engine) RestoreSession(sess Session) {
 }
 
 // RestoreIncompleteFromDisk picks up infohashes left in the piece DB when the
-// process was killed before session save.
+// process was killed before session save. Only resumes hashes that still have
+// a saved .torrent meta — remove/wipe deletes that file so they stay gone.
 func (e *Engine) RestoreIncompleteFromDisk() {
 	hashes, err := IncompleteInfoHashes(e.dataDir)
 	if err != nil || len(hashes) == 0 {
@@ -516,6 +518,9 @@ func (e *Engine) RestoreIncompleteFromDisk() {
 
 	for _, h := range hashes {
 		if _, ok := have[h]; ok {
+			continue
+		}
+		if !fileLooksLikeTorrent(localMetaPath(h)) {
 			continue
 		}
 		_, _ = e.Add("magnet:?xt=urn:btih:" + h)

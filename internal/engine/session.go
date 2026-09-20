@@ -129,3 +129,24 @@ func IncompleteInfoHashes(dataDir string) ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// forgetTorrentState drops resume metadata so a removed torrent is not
+// resurrected by RestoreIncompleteFromDisk on the next launch.
+func forgetTorrentState(dataDir, infoHash string) {
+	infoHash = strings.ToLower(strings.TrimSpace(infoHash))
+	if infoHash == "" {
+		return
+	}
+	_ = os.Remove(localMetaPath(infoHash))
+
+	dbPath := filepath.Join(dataDir, ".torrent.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.Exec(`DELETE FROM piece_completion WHERE lower(infohash) = ?`, infoHash)
+}
