@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -263,8 +264,7 @@ func (m Model) View() string {
 		b.WriteString(dimStyle.Render("no torrents yet — press a to add a magnet or .torrent"))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(headerStyle.Render(fmt.Sprintf("  %-6s  %-8s  %7s  %8s  %8s  %6s  %s",
-			"done", "status", "size", "down", "up", "peers", "name")))
+		b.WriteString(headerStyle.Render("  " + formatHeader()))
 		b.WriteString("\n")
 		for i, s := range m.snaps {
 			line := formatRow(s)
@@ -288,42 +288,135 @@ func (m Model) View() string {
 	return b.String()
 }
 
+// Column widths must match between header and rows. Status is padded to
+// colStatus *before* ANSI styling so escape codes don't shift later columns.
+const (
+	colDone   = 6
+	colStatus = 11
+	colSize   = 7
+	colRate   = 8
+	colETA    = 8
+	colPeers  = 7
+)
+
+func formatHeader() string {
+	return joinCols(
+		padRight("done", colDone),
+		padRight("status", colStatus),
+		padLeft("size", colSize),
+		padLeft("down", colRate),
+		padLeft("up", colRate),
+		padLeft("eta", colETA),
+		padRight("peers", colPeers),
+		"name",
+	)
+}
+
 func formatRow(s engine.Snapshot) string {
 	pct := fmt.Sprintf("%5.1f%%", s.Progress*100)
 	size := humanBytes(s.BytesTotal)
 	if !s.InfoReady {
 		size = "—"
-		pct = "  —  "
+		pct = "—"
 	}
 	name := s.Name
 	if len(name) > 48 {
 		name = name[:45] + "…"
 	}
-	return fmt.Sprintf("%-6s  %-14s  %7s  %8s  %8s  %3d/%-3d  %s",
-		pct,
+	peers := fmt.Sprintf("%d/%d", s.Peers, s.TotalPeers)
+	return joinCols(
+		padRight(pct, colDone),
 		padStatus(s.Status),
-		size,
-		humanRate(s.DownRate),
-		humanRate(s.UpRate),
-		s.Peers,
-		s.TotalPeers,
+		padLeft(size, colSize),
+		padLeft(humanRate(s.DownRate), colRate),
+		padLeft(humanRate(s.UpRate), colRate),
+		padLeft(formatETA(s), colETA),
+		padRight(peers, colPeers),
 		name,
 	)
 }
 
+func joinCols(cols ...string) string {
+	return strings.Join(cols, "  ")
+}
+
+func padLeft(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-n) + s
+}
+
+func padRight(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
+}
+
+// formatETA estimates remaining download time from leftover bytes / down rate.
+func formatETA(s engine.Snapshot) string {
+	switch s.Status {
+	case engine.StatusDone, engine.StatusPaused, engine.StatusFetching, engine.StatusVerifying:
+		return "—"
+	}
+	if !s.InfoReady || s.BytesTotal <= 0 {
+		return "—"
+	}
+	remaining := s.BytesTotal - s.BytesDone
+	if remaining <= 0 {
+		return "—"
+	}
+	if s.DownRate <= 0 {
+		return "∞"
+	}
+	return humanDuration(remaining / s.DownRate)
+}
+
+func humanDuration(secs int64) string {
+	if secs < 0 {
+		return "—"
+	}
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		m, s := secs/60, secs%60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	if secs < 86400 {
+		h, m := secs/3600, (secs%3600)/60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	d, h := secs/86400, (secs%86400)/3600
+	if h == 0 {
+		return fmt.Sprintf("%dd", d)
+	}
+	return fmt.Sprintf("%dd %dh", d, h)
+}
+
 func padStatus(st engine.Status) string {
+	label := "downloading"
+	style := okStyle
 	switch st {
 	case engine.StatusDone:
-		return okStyle.Render(fmt.Sprintf("%-11s", "done"))
+		label, style = "done", okStyle
 	case engine.StatusPaused:
-		return warnStyle.Render(fmt.Sprintf("%-11s", "paused"))
+		label, style = "paused", warnStyle
 	case engine.StatusVerifying:
-		return warnStyle.Render(fmt.Sprintf("%-11s", "verifying"))
+		label, style = "verifying", warnStyle
 	case engine.StatusFetching:
-		return dimStyle.Render(fmt.Sprintf("%-11s", "meta"))
-	default:
-		return okStyle.Render(fmt.Sprintf("%-11s", "downloading"))
+		label, style = "meta", dimStyle
 	}
+	return style.Render(padRight(label, colStatus))
 }
 
 func humanBytes(n int64) string {
