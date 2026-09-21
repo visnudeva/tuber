@@ -11,6 +11,10 @@
   Named for sweet potatoes. Built for the keyboard.
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="tuber screenshot" width="720"/>
+</p>
+
 ---
 
 ## Install
