@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>tuber</b> — a light BitTorrent client for the terminal
+  <b>tuber</b> — a light and simple BitTorrent client for the terminal
 </p>
 
 <p align="center">
