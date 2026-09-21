@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +20,11 @@ import (
 )
 
 func main() {
+	// systemd-resolved nsswitch (hosts: … resolve …) makes Go prefer cgo
+	// getaddrinfo. Concurrent DHT/tracker lookups then race inside NSS and
+	// SIGSEGV with a full goroutine dump. Prefer the pure Go resolver.
+	net.DefaultResolver.PreferGo = true
+
 	home, _ := os.UserHomeDir()
 	defaultDir := filepath.Join(home, "Downloads", "tuber")
 
