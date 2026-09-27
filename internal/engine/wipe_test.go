@@ -103,24 +103,21 @@ func TestWipeIsNotRestoredOnNextLaunch(t *testing.T) {
 	}
 	defer next.Close()
 	next.RestoreSession(sess)
-	if _, err := next.Add(path); !errors.Is(err, errWiped) {
-		// The file is gone; a magnet with the same hash must also stay wiped.
-		magnet := "magnet:?xt=urn:btih:" + hash
-		if _, err = next.Add(magnet); !errors.Is(err, errWiped) {
-			t.Fatalf("restored wiped torrent: %v", err)
-		}
+	magnet := "magnet:?xt=urn:btih:" + hash
+	if _, err := next.Add(magnet); !errors.Is(err, errWiped) {
+		t.Fatalf("restored wiped torrent: %v", err)
 	}
 	if got := next.Snapshots(); len(got) != 0 {
 		t.Fatalf("snapshots after restore: %+v", got)
 	}
 
-	if _, err := next.AddUser("magnet:?xt=urn:btih:" + hash); err != nil {
+	if _, err := next.AddUser(magnet); err != nil {
 		t.Fatal(err)
-	}
-	if !next.isWiped(hash) && len(next.Snapshots()) != 1 {
-		t.Fatalf("deliberate add did not return the torrent")
 	}
 	if next.isWiped(hash) {
 		t.Fatal("deliberate add left the wipe in place")
+	}
+	if len(next.Snapshots()) != 1 {
+		t.Fatalf("deliberate add did not return the torrent")
 	}
 }

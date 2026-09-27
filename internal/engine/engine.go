@@ -172,8 +172,9 @@ func (e *Engine) add(input string, user bool) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if h := strings.ToLower(previewInfoHash(input)); h != "" && !user && e.isWiped(h) {
-		return h, errWiped
+	preview := strings.ToLower(previewInfoHash(input))
+	if preview != "" && !user && e.isWiped(preview) {
+		return preview, errWiped
 	}
 
 	var (
@@ -214,8 +215,8 @@ func (e *Engine) add(input string, user bool) (string, error) {
 	}
 	if user {
 		delete(e.wiped, id)
-		if h := strings.ToLower(previewInfoHash(input)); h != "" {
-			delete(e.wiped, h)
+		if preview != "" {
+			delete(e.wiped, preview)
 		}
 	}
 	if existing, ok := e.items[id]; ok {
@@ -249,9 +250,10 @@ func (e *Engine) bootstrap(it *item) {
 	}
 
 	e.mu.Lock()
-	if it.dropped {
+	id := strings.ToLower(it.t.InfoHash().HexString())
+	if it.dropped || e.items[id] != it {
 		e.mu.Unlock()
-		_ = os.Remove(localMetaPath(it.t.InfoHash().HexString()))
+		_ = os.Remove(localMetaPath(id))
 		return
 	}
 	paused := it.paused
@@ -267,12 +269,10 @@ func (e *Engine) bootstrap(it *item) {
 	_ = it.t.VerifyData()
 
 	e.mu.Lock()
-	if it.dropped {
-		e.mu.Unlock()
-		return
+	if e.items[strings.ToLower(it.t.InfoHash().HexString())] == it {
+		it.verifying = false
+		e.persistLocked()
 	}
-	it.verifying = false
-	e.persistLocked()
 	e.mu.Unlock()
 
 	if !paused && e.stillHere(it) {
@@ -436,6 +436,7 @@ func (e *Engine) TogglePause(id string) (paused bool, err error) {
 func (e *Engine) Delete(id string, removeFiles bool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	id = strings.ToLower(id)
 	it, ok := e.items[id]
 	if !ok {
 		return fmt.Errorf("unknown torrent")
@@ -470,7 +471,6 @@ func (e *Engine) Delete(id string, removeFiles bool) error {
 	origin := it.torrentFile
 	it.dropped = true
 	it.t.Drop()
-	delete(e.items, strings.ToLower(id))
 	delete(e.items, id)
 	if removeFiles {
 		e.tombstone(id)
@@ -614,17 +614,6 @@ func (e *Engine) Snapshots() []Snapshot {
 				out[i], out[j] = out[j], out[i]
 			}
 		}
-	}
-	return out
-}
-
-func (e *Engine) Sources() []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	s := e.sessionLocked()
-	out := make([]string, 0, len(s.Torrents))
-	for _, t := range s.Torrents {
-		out = append(out, t.Magnet)
 	}
 	return out
 }

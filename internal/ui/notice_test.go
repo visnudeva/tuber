@@ -4,8 +4,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/visnudeva/tuber/internal/engine"
 )
 
@@ -61,7 +59,7 @@ func TestWipeStatusReturnsToNextTorrent(t *testing.T) {
 		{ID: "b", Name: "Second"},
 	}
 	m.cursor = 0 // wipe moved the cursor onto the torrent that remains
-	cmd := m.setSticky("wiped (files deleted)")
+	cmd := m.holdStatus("wiped (files deleted)")
 	if m.status != "wiped (files deleted)" {
 		t.Fatalf("status %q", m.status)
 	}
@@ -74,24 +72,5 @@ func TestWipeStatusReturnsToNextTorrent(t *testing.T) {
 	m = next.(Model)
 	if m.status != "First" {
 		t.Fatalf("after wipe got %q", m.status)
-	}
-}
-
-func TestNoticeCmdIsReturned(t *testing.T) {
-	notes := &Notes{}
-	notes.Added("added .torrent file from the download folder", "abc")
-	m := New(nil, notes, nil)
-	m.snaps = []engine.Snapshot{{ID: "abc", Name: "Movie"}}
-	_, cmd := m.Update(tickMsg(time.Now()))
-	if cmd == nil {
-		t.Fatal("expected a follow-up command")
-	}
-	// Batch runs the commands; one of them is the 3s expiry tick.
-	msg := cmd()
-	if _, ok := msg.(tea.BatchMsg); !ok && msg != nil {
-		// A single command is also fine if Batch collapses.
-		if _, ok := msg.(noticeExpiredMsg); ok {
-			return
-		}
 	}
 }

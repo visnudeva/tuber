@@ -212,20 +212,6 @@ func MagnetsIn(text string) []string {
 	return out
 }
 
-// UserDownloadDir is the XDG download folder when it is set to a real
-// directory, otherwise ~/Downloads. An unconfigured xdg-user-dir returns the
-// home directory itself; that is not the download folder.
-func UserDownloadDir() string {
-	home, _ := os.UserHomeDir()
-	if d := configuredDownload(home); d != "" {
-		return d
-	}
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, "Downloads")
-}
-
 // Dirs is ~/Downloads, the XDG download folder when that is somewhere else,
 // and the tuber data directory. The home directory itself is never scanned.
 func Dirs(dataDir string) []string {
@@ -323,11 +309,4 @@ func uniqueDirs(dirs []string) []string {
 		out = append(out, d)
 	}
 	return out
-}
-
-func short(id string) string {
-	if len(id) > 8 {
-		return id[:8]
-	}
-	return id
 }

@@ -63,11 +63,6 @@ func Handoff(args []string) error {
 	return nil
 }
 
-// Alive reports whether a primary tuber is accepting IPC.
-func Alive() bool {
-	return Handoff(nil) == nil
-}
-
 // Handler is called on the primary for each handoff request.
 // It should add torrents and return a non-nil error only on hard failure.
 type Handler func(args []string) error
