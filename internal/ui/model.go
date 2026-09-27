@@ -146,22 +146,19 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adding = false
 		m.input.Blur()
 		m.input.SetValue("")
-		m.setSticky("cancelled")
-		return m, nil
+		return m, m.setSticky("cancelled")
 	case "enter":
 		val := strings.TrimSpace(m.input.Value())
 		m.adding = false
 		m.input.Blur()
 		m.input.SetValue("")
 		if val == "" {
-			m.setSticky("nothing to add")
-			return m, nil
+			return m, m.setSticky("nothing to add")
 		}
 		id, err := m.eng.Add(val)
 		if err != nil {
 			m.errFlash = err.Error()
-			m.setSticky("add failed")
-			return m, nil
+			return m, m.setSticky("add failed")
 		}
 		m.errFlash = ""
 		m.snaps = m.eng.Snapshots()
@@ -210,12 +207,11 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				if paused {
-					m.setSticky("paused")
-				} else {
-					m.setSticky("downloading")
-				}
 				m.snaps = m.eng.Snapshots()
+				if paused {
+					return m, m.setSticky("paused")
+				}
+				return m, m.setSticky("downloading")
 			}
 		}
 	case "r", "R":
@@ -224,11 +220,11 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.setSticky("removed (files kept)")
 				m.snaps = m.eng.Snapshots()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
 				}
+				return m, m.setSticky("removed (files kept)")
 			}
 		}
 	case "w", "W":
@@ -237,15 +233,15 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.setSticky("wiped (files deleted)")
 				m.snaps = m.eng.Snapshots()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
 				}
+				return m, m.setSticky("wiped (files deleted)")
 			}
 		}
 	case "?":
-		m.setSticky("a add · p/space pause · r remove · w wipe · ↑/↓ move · q quit")
+		return m, m.setSticky("a add · p/space pause · r remove · w wipe · ↑/↓ move · q quit")
 	}
 	return m, nil
 }
@@ -308,11 +304,10 @@ func (m *Model) followFocus() {
 	m.showFocus()
 }
 
-func (m *Model) setSticky(s string) {
-	m.status = s
-	m.statusUntil = time.Time{}
-	m.showingFocus = false
-	m.noticeGen++
+// setSticky shows an action message, then the 3s notice timer hands the line
+// back to the torrent under the cursor.
+func (m *Model) setSticky(s string) tea.Cmd {
+	return m.holdStatus(s)
 }
 
 func (m Model) focusedLabel() string {

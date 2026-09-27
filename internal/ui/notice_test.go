@@ -54,6 +54,29 @@ func TestAddedNoticeReturnsToFocusedTorrent(t *testing.T) {
 	}
 }
 
+func TestWipeStatusReturnsToNextTorrent(t *testing.T) {
+	m := New(nil, &Notes{}, nil)
+	m.snaps = []engine.Snapshot{
+		{ID: "a", Name: "First"},
+		{ID: "b", Name: "Second"},
+	}
+	m.cursor = 0 // wipe moved the cursor onto the torrent that remains
+	cmd := m.setSticky("wiped (files deleted)")
+	if m.status != "wiped (files deleted)" {
+		t.Fatalf("status %q", m.status)
+	}
+	if cmd == nil {
+		t.Fatal("expected expiry command")
+	}
+
+	m.statusUntil = time.Now().Add(-time.Millisecond)
+	next, _ := m.Update(tickMsg(time.Now()))
+	m = next.(Model)
+	if m.status != "First" {
+		t.Fatalf("after wipe got %q", m.status)
+	}
+}
+
 func TestNoticeCmdIsReturned(t *testing.T) {
 	notes := &Notes{}
 	notes.Added("added .torrent file from the download folder", "abc")
