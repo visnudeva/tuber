@@ -59,8 +59,9 @@ func main() {
 	}
 
 	notes := &ui.Notes{}
+	watchDirs := watch.Dirs(*dataDir)
 	stopWatch := watch.Start(eng, notes, watch.Config{
-		Dirs:          watch.Dirs(*dataDir),
+		Dirs:          watchDirs,
 		ReadClipboard: clipboard.ReadAll,
 	})
 	shutdown := func() {
@@ -113,7 +114,7 @@ func main() {
 	}
 	defer srv.Close()
 
-	p := tea.NewProgram(ui.New(eng, notes), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(eng, notes, watchDirs), tea.WithAltScreen())
 
 	// Restore after the UI is up so a slow verify/session never looks like a hang.
 	go func() {

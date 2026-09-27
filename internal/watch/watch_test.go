@@ -113,6 +113,65 @@ type errAlready struct{}
 
 func (errAlready) Error() string { return "already added: demo" }
 
+func TestCollectDirsAlwaysIncludesDownloads(t *testing.T) {
+	home := "/home/user"
+	data := home + "/Downloads/tuber"
+	got := collectDirs(home, home, data)
+	joined := strings.Join(got, "|")
+	if strings.Contains(joined, home+"|") || joined == home || strings.HasSuffix(joined, "|"+home) {
+		t.Fatalf("scanned home: %#v", got)
+	}
+	want := home + "/Downloads"
+	found := false
+	for _, d := range got {
+		if d == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing Downloads: %#v", got)
+	}
+}
+
+func TestParseUserDirsDownloadIgnoresHome(t *testing.T) {
+	text := "XDG_DOWNLOAD_DIR=\"$HOME\"\n"
+	if parseUserDirsDownload(text, "/home/user") != "" {
+		t.Fatal("home treated as download dir")
+	}
+	got := parseUserDirsDownload("XDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\n", "/home/user")
+	if got != "/home/user/Downloads" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFailedTorrentFileIsRetried(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.torrent")
+	if err := os.WriteFile(path, []byte("d8:announce0:e"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	add := &fakeAdd{fail: map[string]error{path: errBoom{}}}
+	note := &fakeNote{}
+	st := &State{}
+	scanTorrentFiles(add, note, st, []string{dir})
+	scanTorrentFiles(add, note, st, []string{dir})
+	if len(add.calls) != 2 {
+		t.Fatalf("calls %#v", add.calls)
+	}
+	if len(note.msgs) != 1 || note.msgs[0] != "movie.torrent: boom" {
+		t.Fatalf("notes %#v", note.msgs)
+	}
+	delete(add.fail, path)
+	scanTorrentFiles(add, note, st, []string{dir})
+	if len(add.calls) != 3 {
+		t.Fatalf("no retry success: %#v", add.calls)
+	}
+}
+
+type errBoom struct{}
+
+func (errBoom) Error() string { return "boom" }
+
 func TestPollReadsClipboard(t *testing.T) {
 	magnet := "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
 	add := &fakeAdd{}

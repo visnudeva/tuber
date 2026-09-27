@@ -59,6 +59,7 @@ func Start(add Adder, note Notifier, cfg Config) (stop func()) {
 // State remembers files and clipboard text already handled.
 type State struct {
 	files   map[string]stamp
+	errs    map[string]string
 	clip    string
 	clipSet bool
 }
@@ -85,6 +86,9 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 	if st.files == nil {
 		st.files = map[string]stamp{}
 	}
+	if st.errs == nil {
+		st.errs = map[string]string{}
+	}
 	var added []string
 	for _, dir := range uniqueDirs(dirs) {
 		entries, err := os.ReadDir(dir)
@@ -92,30 +96,35 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 			continue
 		}
 		for _, ent := range entries {
-			if ent.IsDir() {
-				continue
-			}
 			name := ent.Name()
-			if !strings.HasSuffix(strings.ToLower(name), ".torrent") {
-				continue
-			}
-			info, err := ent.Info()
-			if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			if ent.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".torrent") {
 				continue
 			}
 			path := filepath.Join(dir, name)
+			info, err := os.Stat(path)
+			if err != nil || info.IsDir() || info.Size() == 0 {
+				continue
+			}
 			stmp := stamp{mod: info.ModTime().UnixNano(), size: info.Size()}
 			if prev, ok := st.files[path]; ok && prev == stmp {
 				continue
 			}
 			id, err := add.Add(path)
-			st.files[path] = stmp
 			if err != nil {
-				if !strings.Contains(err.Error(), "already added") && note != nil {
-					note.Set(err.Error())
+				if strings.Contains(err.Error(), "already added") {
+					st.files[path] = stmp
+					delete(st.errs, path)
+					continue
+				}
+				msg := name + ": " + err.Error()
+				if note != nil && st.errs[path] != msg {
+					note.Set(msg)
+					st.errs[path] = msg
 				}
 				continue
 			}
+			st.files[path] = stmp
+			delete(st.errs, path)
 			added = append(added, id)
 		}
 	}
@@ -183,29 +192,98 @@ func MagnetsIn(text string) []string {
 	return out
 }
 
-// UserDownloadDir is the XDG download folder, or ~/Downloads.
+// UserDownloadDir is the XDG download folder when it is set to a real
+// directory, otherwise ~/Downloads. An unconfigured xdg-user-dir returns the
+// home directory itself; that is not the download folder.
 func UserDownloadDir() string {
-	if out, err := exec.Command("xdg-user-dir", "DOWNLOAD").Output(); err == nil {
-		p := strings.TrimSpace(string(out))
-		if p != "" && !strings.Contains(p, "\n") {
-			return p
-		}
+	home, _ := os.UserHomeDir()
+	if d := configuredDownload(home); d != "" {
+		return d
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	if home == "" {
 		return ""
 	}
 	return filepath.Join(home, "Downloads")
 }
 
-// Dirs is the user download folder plus the tuber data directory.
+// Dirs is ~/Downloads, the XDG download folder when that is somewhere else,
+// and the tuber data directory. The home directory itself is never scanned.
 func Dirs(dataDir string) []string {
-	var dirs []string
-	if d := UserDownloadDir(); d != "" {
-		dirs = append(dirs, d)
+	home, _ := os.UserHomeDir()
+	return collectDirs(home, configuredDownload(home), dataDir)
+}
+
+func configuredDownload(home string) string {
+	if d := downloadFromUserDirs(home); d != "" {
+		return d
 	}
-	if strings.TrimSpace(dataDir) != "" {
-		dirs = append(dirs, dataDir)
+	out, err := exec.Command("xdg-user-dir", "DOWNLOAD").Output()
+	if err != nil {
+		return ""
+	}
+	return acceptDownload(strings.TrimSpace(string(out)), home)
+}
+
+func downloadFromUserDirs(home string) string {
+	cfg := os.Getenv("XDG_CONFIG_HOME")
+	if cfg == "" {
+		if home == "" {
+			return ""
+		}
+		cfg = filepath.Join(home, ".config")
+	}
+	b, err := os.ReadFile(filepath.Join(cfg, "user-dirs.dirs"))
+	if err != nil {
+		return ""
+	}
+	return parseUserDirsDownload(string(b), home)
+}
+
+func parseUserDirsDownload(text, home string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "XDG_DOWNLOAD_DIR" {
+			continue
+		}
+		val = strings.Trim(strings.TrimSpace(val), `"`)
+		val = strings.ReplaceAll(val, "${HOME}", home)
+		val = strings.ReplaceAll(val, "$HOME", home)
+		return acceptDownload(val, home)
+	}
+	return ""
+}
+
+func acceptDownload(path, home string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	home = filepath.Clean(strings.TrimSpace(home))
+	if path == "" || path == "." || path == "/" || strings.Contains(path, "\n") {
+		return ""
+	}
+	if home != "" && home != "." && path == home {
+		return ""
+	}
+	return path
+}
+
+func collectDirs(home, xdg, dataDir string) []string {
+	var dirs []string
+	add := func(p string) {
+		if p = acceptDownload(p, home); p != "" {
+			dirs = append(dirs, p)
+		}
+	}
+	home = filepath.Clean(strings.TrimSpace(home))
+	if home != "" && home != "." {
+		add(filepath.Join(home, "Downloads"))
+	}
+	add(xdg)
+	add(dataDir)
+	if p := filepath.Clean(strings.TrimSpace(dataDir)); p != "" && p != "." {
+		add(filepath.Dir(p))
 	}
 	return uniqueDirs(dirs)
 }

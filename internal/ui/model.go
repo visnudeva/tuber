@@ -43,29 +43,31 @@ func (n *Notes) Take() string {
 }
 
 type Model struct {
-	eng      *engine.Engine
-	notes    *Notes
-	snaps    []engine.Snapshot
-	cursor   int
-	width    int
-	height   int
-	adding   bool
-	input    textinput.Model
-	status   string
-	errFlash string
-	quit     bool
+	eng       *engine.Engine
+	notes     *Notes
+	snaps     []engine.Snapshot
+	cursor    int
+	width     int
+	height    int
+	adding    bool
+	input     textinput.Model
+	status    string
+	errFlash  string
+	quit      bool
+	watchDirs []string
 }
 
-func New(eng *engine.Engine, notes *Notes) Model {
+func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
 	ti := textinput.New()
 	ti.Placeholder = "magnet:?xt=…  or  /path/to/file.torrent  or  infohash"
 	ti.CharLimit = 2048
 	ti.Width = 72
 	return Model{
-		eng:    eng,
-		notes:  notes,
-		input:  ti,
-		status: "ready",
+		eng:       eng,
+		notes:     notes,
+		input:     ti,
+		status:    "ready",
+		watchDirs: watchDirs,
 	}
 }
 
@@ -248,7 +250,12 @@ func (m Model) View() string {
 	b.WriteString(titleStyle.Render("tuber"))
 	b.WriteString(dimStyle.Render("  ·  light torrent tui  ·  "))
 	b.WriteString(dimStyle.Render(m.eng.DataDir()))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	if len(m.watchDirs) > 0 {
+		b.WriteString(dimStyle.Render("watching " + strings.Join(m.watchDirs, ", ")))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	if m.adding {
 		b.WriteString(headerStyle.Render("add torrent"))
