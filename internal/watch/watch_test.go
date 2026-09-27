@@ -73,7 +73,7 @@ func TestScanTorrentFilesTopLevelOnly(t *testing.T) {
 	if len(add.calls) != 1 || !strings.HasSuffix(add.calls[0], "movie.torrent") {
 		t.Fatalf("calls %#v", add.calls)
 	}
-	if len(note.msgs) != 1 || !strings.HasPrefix(note.msgs[0], "added torrent ") {
+	if len(note.msgs) != 1 || note.msgs[0] != "added .torrent file from the download folder" {
 		t.Fatalf("notes %#v", note.msgs)
 	}
 
@@ -97,7 +97,7 @@ func TestScanClipboardOncePerChange(t *testing.T) {
 	if len(add.calls) != 1 {
 		t.Fatalf("calls %#v", add.calls)
 	}
-	if note.msgs[0] != "added magnet 01234567" {
+	if note.msgs[0] != "added magnet from the clipboard" {
 		t.Fatalf("note %q", note.msgs[0])
 	}
 

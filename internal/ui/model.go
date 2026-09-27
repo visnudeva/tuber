@@ -16,10 +16,15 @@ import (
 
 type tickMsg time.Time
 
+// How long an "added …" notice stays before the status line returns to the
+// torrent the cursor is on.
+const noticeFor = 3 * time.Second
+
 // Notes carries status text from the IPC handoff goroutine into the TUI.
 type Notes struct {
-	mu  sync.Mutex
-	msg string
+	mu    sync.Mutex
+	msg   string
+	focus string
 }
 
 func (n *Notes) Set(msg string) {
@@ -28,33 +33,47 @@ func (n *Notes) Set(msg string) {
 	}
 	n.mu.Lock()
 	n.msg = msg
+	n.focus = ""
 	n.mu.Unlock()
 }
 
-func (n *Notes) Take() string {
+// Added records a notice and the torrent it should leave selected.
+func (n *Notes) Added(msg, id string) {
 	if n == nil {
-		return ""
+		return
+	}
+	n.mu.Lock()
+	n.msg = msg
+	n.focus = id
+	n.mu.Unlock()
+}
+
+func (n *Notes) Take() (string, string) {
+	if n == nil {
+		return "", ""
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	msg := n.msg
-	n.msg = ""
-	return msg
+	msg, id := n.msg, n.focus
+	n.msg, n.focus = "", ""
+	return msg, id
 }
 
 type Model struct {
-	eng       *engine.Engine
-	notes     *Notes
-	snaps     []engine.Snapshot
-	cursor    int
-	width     int
-	height    int
-	adding    bool
-	input     textinput.Model
-	status    string
-	errFlash  string
-	quit      bool
-	watchDirs []string
+	eng          *engine.Engine
+	notes        *Notes
+	snaps        []engine.Snapshot
+	cursor       int
+	width        int
+	height       int
+	adding       bool
+	input        textinput.Model
+	status       string
+	errFlash     string
+	quit         bool
+	watchDirs    []string
+	statusUntil  time.Time
+	showingFocus bool
 }
 
 func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
@@ -95,9 +114,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.snaps) == 0 {
 			m.cursor = 0
 		}
-		if note := m.notes.Take(); note != "" {
+		if note, focus := m.notes.Take(); note != "" {
 			m.errFlash = ""
-			m.status = note
+			m.holdStatus(note)
+			m.selectID(focus)
+		} else if !m.statusUntil.IsZero() && !time.Now().Before(m.statusUntil) {
+			m.showFocus()
+		} else if m.showingFocus {
+			m.status = m.focusedLabel()
 		}
 		return m, tick()
 
@@ -116,7 +140,7 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adding = false
 		m.input.Blur()
 		m.input.SetValue("")
-		m.status = "cancelled"
+		m.setSticky("cancelled")
 		return m, nil
 	case "enter":
 		val := strings.TrimSpace(m.input.Value())
@@ -124,18 +148,19 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		m.input.SetValue("")
 		if val == "" {
-			m.status = "nothing to add"
+			m.setSticky("nothing to add")
 			return m, nil
 		}
 		id, err := m.eng.Add(val)
 		if err != nil {
 			m.errFlash = err.Error()
-			m.status = "add failed"
+			m.setSticky("add failed")
 			return m, nil
 		}
 		m.errFlash = ""
-		m.status = "added " + short(id)
 		m.snaps = m.eng.Snapshots()
+		m.selectID(id)
+		m.holdStatus("added " + short(id))
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -152,23 +177,27 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adding = true
 		m.input.SetValue("")
 		m.input.Focus()
-		m.status = "paste magnet / path / hash, enter to add, esc cancel"
+		m.setSticky("paste magnet / path / hash, enter to add, esc cancel")
 		m.errFlash = ""
 		return m, textinput.Blink
 	case "down":
 		if m.cursor < len(m.snaps)-1 {
 			m.cursor++
 		}
+		m.followFocus()
 	case "up":
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		m.followFocus()
 	case "g":
 		m.cursor = 0
+		m.followFocus()
 	case "G":
 		if len(m.snaps) > 0 {
 			m.cursor = len(m.snaps) - 1
 		}
+		m.followFocus()
 	case "p", " ":
 		if id, ok := m.selectedID(); ok {
 			paused, err := m.eng.TogglePause(id)
@@ -177,9 +206,9 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.errFlash = ""
 				if paused {
-					m.status = "paused"
+					m.setSticky("paused")
 				} else {
-					m.status = "downloading"
+					m.setSticky("downloading")
 				}
 				m.snaps = m.eng.Snapshots()
 			}
@@ -190,7 +219,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.status = "removed (files kept)"
+				m.setSticky("removed (files kept)")
 				m.snaps = m.eng.Snapshots()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
@@ -203,7 +232,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.status = "wiped (files deleted)"
+				m.setSticky("wiped (files deleted)")
 				m.snaps = m.eng.Snapshots()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
@@ -211,9 +240,61 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "?":
-		m.status = "a add · p/space pause · r remove · w wipe · ↑/↓ move · q quit"
+		m.setSticky("a add · p/space pause · r remove · w wipe · ↑/↓ move · q quit")
 	}
 	return m, nil
+}
+
+func (m *Model) holdStatus(s string) {
+	m.status = s
+	m.showingFocus = false
+	m.statusUntil = time.Now().Add(noticeFor)
+}
+
+func (m *Model) showFocus() {
+	m.statusUntil = time.Time{}
+	m.showingFocus = true
+	m.status = m.focusedLabel()
+}
+
+func (m Model) holding() bool {
+	return !m.statusUntil.IsZero() && time.Now().Before(m.statusUntil)
+}
+
+func (m *Model) followFocus() {
+	if m.holding() {
+		return
+	}
+	m.showFocus()
+}
+
+func (m *Model) setSticky(s string) {
+	m.status = s
+	m.statusUntil = time.Time{}
+	m.showingFocus = false
+}
+
+func (m Model) focusedLabel() string {
+	if len(m.snaps) == 0 || m.cursor < 0 || m.cursor >= len(m.snaps) {
+		return "ready"
+	}
+	name := m.snaps[m.cursor].Name
+	if name == "" {
+		return "ready"
+	}
+	return name
+}
+
+func (m *Model) selectID(id string) {
+	if id == "" {
+		return
+	}
+	for i, s := range m.snaps {
+		if s.ID == id {
+			m.cursor = i
+			return
+		}
+	}
 }
 
 func (m Model) selectedID() (string, bool) {

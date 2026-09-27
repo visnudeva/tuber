@@ -132,10 +132,10 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 		return
 	}
 	if len(added) == 1 {
-		note.Set("added torrent " + short(added[0]))
+		announce(note, "added .torrent file from the download folder", added[0])
 		return
 	}
-	note.Set(fmt.Sprintf("added %d torrents from Downloads", len(added)))
+	announce(note, fmt.Sprintf("added %d .torrent files from the download folder", len(added)), added[len(added)-1])
 }
 
 func scanClipboard(add Adder, note Notifier, st *State, text string) {
@@ -159,10 +159,22 @@ func scanClipboard(add Adder, note Notifier, st *State, text string) {
 		return
 	}
 	if len(added) == 1 {
-		note.Set("added magnet " + short(added[0]))
+		announce(note, "added magnet from the clipboard", added[0])
 		return
 	}
-	note.Set(fmt.Sprintf("added %d magnets from clipboard", len(added)))
+	announce(note, fmt.Sprintf("added %d magnets from the clipboard", len(added)), added[len(added)-1])
+}
+
+// announce prefers a notifier that can also point the UI at the new torrent.
+func announce(note Notifier, msg, id string) {
+	if note == nil {
+		return
+	}
+	if a, ok := note.(interface{ Added(string, string) }); ok {
+		a.Added(msg, id)
+		return
+	}
+	note.Set(msg)
 }
 
 var (
