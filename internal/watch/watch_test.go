@@ -84,6 +84,30 @@ func TestScanTorrentFilesTopLevelOnly(t *testing.T) {
 	}
 }
 
+func TestTorrentFileAddedAgainAfterItDisappears(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.torrent")
+	body := []byte("d8:announce0:e")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	add := &fakeAdd{}
+	note := &fakeNote{}
+	st := &State{}
+	scanTorrentFiles(add, note, st, []string{dir})
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	scanTorrentFiles(add, note, st, []string{dir})
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scanTorrentFiles(add, note, st, []string{dir})
+	if len(add.calls) != 2 || add.calls[0] != path || add.calls[1] != path {
+		t.Fatalf("calls %#v", add.calls)
+	}
+}
+
 func TestWipedTorrentStaysQuiet(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "movie.torrent")

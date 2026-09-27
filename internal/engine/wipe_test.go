@@ -68,6 +68,10 @@ func TestWipeIsNotRestoredOnNextLaunch(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	downloads := t.TempDir()
 	path, hash := writeTorrent(t, downloads, "movie.torrent")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	eng, err := New(t.TempDir())
 	if err != nil {
@@ -111,7 +115,11 @@ func TestWipeIsNotRestoredOnNextLaunch(t *testing.T) {
 		t.Fatalf("snapshots after restore: %+v", got)
 	}
 
-	if _, err := next.AddUser(magnet); err != nil {
+	again := filepath.Join(downloads, "movie.torrent")
+	if err := os.WriteFile(again, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := next.AddFile(again); err != nil {
 		t.Fatal(err)
 	}
 	if next.isWiped(hash) {

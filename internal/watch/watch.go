@@ -90,6 +90,7 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 		st.errs = map[string]string{}
 	}
 	var added []string
+	seen := map[string]struct{}{}
 	for _, dir := range uniqueDirs(dirs) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -106,10 +107,11 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 				continue
 			}
 			stmp := stamp{mod: info.ModTime().UnixNano(), size: info.Size()}
+			seen[path] = struct{}{}
 			if prev, ok := st.files[path]; ok && prev == stmp {
 				continue
 			}
-			id, err := add.Add(path)
+			id, err := addDownloadFile(add, path)
 			if err != nil {
 				if quietAdd(err) {
 					st.files[path] = stmp
@@ -126,6 +128,12 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 			st.files[path] = stmp
 			delete(st.errs, path)
 			added = append(added, id)
+		}
+	}
+	for path := range st.files {
+		if _, ok := seen[path]; !ok {
+			delete(st.files, path)
+			delete(st.errs, path)
 		}
 	}
 	if note == nil || len(added) == 0 {
@@ -163,6 +171,15 @@ func scanClipboard(add Adder, note Notifier, st *State, text string) {
 		return
 	}
 	announce(note, fmt.Sprintf("added %d magnets from the clipboard", len(added)), added[len(added)-1])
+}
+
+// addDownloadFile accepts a .torrent saved again after a wipe. Other adders
+// keep the wipe and will not restart that torrent from the clipboard or session.
+func addDownloadFile(add Adder, path string) (string, error) {
+	if f, ok := add.(interface{ AddFile(string) (string, error) }); ok {
+		return f.AddFile(path)
+	}
+	return add.Add(path)
 }
 
 func quietAdd(err error) bool {

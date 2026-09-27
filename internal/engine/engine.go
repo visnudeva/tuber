@@ -152,8 +152,8 @@ func (e *Engine) Close() {
 func (e *Engine) DataDir() string { return e.dataDir }
 
 // Add enqueues a torrent. Wiped infohashes are refused so a later launch does
-// not bring them back from the session, the piece database, a leftover
-// .torrent, or a magnet still sitting on the clipboard.
+// not bring them back from the session, the piece database, or a magnet still
+// sitting on the clipboard.
 func (e *Engine) Add(input string) (string, error) {
 	return e.add(input, false)
 }
@@ -161,6 +161,12 @@ func (e *Engine) Add(input string) (string, error) {
 // AddUser enqueues a torrent the user asked for and forgets a previous wipe.
 func (e *Engine) AddUser(input string) (string, error) {
 	return e.add(input, true)
+}
+
+// AddFile starts a .torrent placed in a download folder. Saving that file
+// again after a wipe starts the torrent; session and clipboard restores do not.
+func (e *Engine) AddFile(path string) (string, error) {
+	return e.add(path, true)
 }
 
 func (e *Engine) add(input string, user bool) (string, error) {
