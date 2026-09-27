@@ -16,6 +16,8 @@ import (
 
 type tickMsg time.Time
 
+type noticeExpiredMsg struct{ gen int }
+
 // How long an "added …" notice stays before the status line returns to the
 // torrent the cursor is on.
 const noticeFor = 3 * time.Second
@@ -74,6 +76,9 @@ type Model struct {
 	watchDirs    []string
 	statusUntil  time.Time
 	showingFocus bool
+	noticeGen    int
+	lastNotice   string
+	lastFocus    string
 }
 
 func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
@@ -107,23 +112,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		m.snaps = m.eng.Snapshots()
+		if m.eng != nil {
+			m.snaps = m.eng.Snapshots()
+		}
 		if m.cursor >= len(m.snaps) && len(m.snaps) > 0 {
 			m.cursor = len(m.snaps) - 1
 		}
 		if len(m.snaps) == 0 {
 			m.cursor = 0
 		}
-		if note, focus := m.notes.Take(); note != "" {
-			m.errFlash = ""
-			m.holdStatus(note)
-			m.selectID(focus)
-		} else if !m.statusUntil.IsZero() && !time.Now().Before(m.statusUntil) {
+		extra := m.takeNotice()
+		m.expireNotice()
+		return m, tea.Batch(tick(), extra)
+
+	case noticeExpiredMsg:
+		if msg.gen == m.noticeGen {
 			m.showFocus()
-		} else if m.showingFocus {
-			m.status = m.focusedLabel()
 		}
-		return m, tick()
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.adding {
@@ -160,8 +166,7 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.errFlash = ""
 		m.snaps = m.eng.Snapshots()
 		m.selectID(id)
-		m.holdStatus("added " + short(id))
-		return m, nil
+		return m, m.holdStatus("added " + short(id))
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -245,10 +250,45 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) holdStatus(s string) {
+func (m *Model) takeNotice() tea.Cmd {
+	if m.notes == nil {
+		return nil
+	}
+	note, focus := m.notes.Take()
+	if note == "" {
+		return nil
+	}
+	m.errFlash = ""
+	m.selectID(focus)
+	// A repeated notice (same text, same torrent) must not restart the timer.
+	// Otherwise the line stays on the add sentence.
+	if note == m.lastNotice && focus == m.lastFocus {
+		return nil
+	}
+	m.lastNotice = note
+	m.lastFocus = focus
+	return m.holdStatus(note)
+}
+
+func (m *Model) expireNotice() {
+	if m.showingFocus {
+		m.status = m.focusedLabel()
+		return
+	}
+	if !m.statusUntil.IsZero() && !time.Now().Before(m.statusUntil) {
+		m.showFocus()
+	}
+}
+
+func (m *Model) holdStatus(s string) tea.Cmd {
 	m.status = s
 	m.showingFocus = false
+	m.noticeGen++
+	gen := m.noticeGen
 	m.statusUntil = time.Now().Add(noticeFor)
+	return tea.Tick(noticeFor, func(time.Time) tea.Msg {
+		return noticeExpiredMsg{gen: gen}
+	})
 }
 
 func (m *Model) showFocus() {
@@ -272,17 +312,21 @@ func (m *Model) setSticky(s string) {
 	m.status = s
 	m.statusUntil = time.Time{}
 	m.showingFocus = false
+	m.noticeGen++
 }
 
 func (m Model) focusedLabel() string {
 	if len(m.snaps) == 0 || m.cursor < 0 || m.cursor >= len(m.snaps) {
 		return "ready"
 	}
-	name := m.snaps[m.cursor].Name
-	if name == "" {
-		return "ready"
+	s := m.snaps[m.cursor]
+	if s.Name != "" {
+		return s.Name
 	}
-	return name
+	if s.ID != "" {
+		return short(s.ID)
+	}
+	return "ready"
 }
 
 func (m *Model) selectID(id string) {
