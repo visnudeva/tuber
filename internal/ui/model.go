@@ -261,7 +261,7 @@ func (m Model) View() string {
 	}
 
 	if len(m.snaps) == 0 {
-		b.WriteString(dimStyle.Render("no torrents yet — press a to add a magnet or .torrent"))
+		b.WriteString(dimStyle.Render("no torrents yet — drop a .torrent in Downloads, copy a magnet, or press a"))
 		b.WriteString("\n\n")
 	} else {
 		b.WriteString(headerStyle.Render("  " + formatHeader()))

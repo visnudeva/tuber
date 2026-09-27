@@ -12,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/visnudeva/tuber/internal/engine"
 	"github.com/visnudeva/tuber/internal/ipc"
 	"github.com/visnudeva/tuber/internal/ui"
+	"github.com/visnudeva/tuber/internal/watch"
 )
 
 func main() {
@@ -56,7 +58,13 @@ func main() {
 		fatalWait("tuber: %v", err)
 	}
 
+	notes := &ui.Notes{}
+	stopWatch := watch.Start(eng, notes, watch.Config{
+		Dirs:          watch.Dirs(*dataDir),
+		ReadClipboard: clipboard.ReadAll,
+	})
 	shutdown := func() {
+		stopWatch()
 		_ = eng.Persist()
 		eng.Close()
 	}
@@ -71,7 +79,6 @@ func main() {
 	}()
 	defer shutdown()
 
-	notes := &ui.Notes{}
 	srv, err := ipc.Listen(func(addArgs []string) error {
 		var added int
 		var last string
