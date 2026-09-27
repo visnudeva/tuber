@@ -13,6 +13,7 @@ import (
 type SessionTorrent struct {
 	Magnet string `json:"magnet"`
 	Meta   string `json:"meta,omitempty"` // local .torrent path for instant resume
+	File   string `json:"file,omitempty"` // .torrent in the download folder
 	Paused bool   `json:"paused,omitempty"`
 	Name   string `json:"name,omitempty"`
 }

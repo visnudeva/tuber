@@ -13,6 +13,8 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+
+	"github.com/visnudeva/tuber/internal/watch"
 )
 
 type Status string
@@ -26,18 +28,18 @@ const (
 )
 
 type Snapshot struct {
-	ID           string
-	Name         string
-	Status       Status
-	Progress     float64
-	BytesDone    int64
-	BytesTotal   int64
-	DownRate     int64
-	UpRate       int64
-	Peers        int
-	TotalPeers   int
-	InfoReady    bool
-	Source       string
+	ID         string
+	Name       string
+	Status     Status
+	Progress   float64
+	BytesDone  int64
+	BytesTotal int64
+	DownRate   int64
+	UpRate     int64
+	Peers      int
+	TotalPeers int
+	InfoReady  bool
+	Source     string
 }
 
 type Engine struct {
@@ -48,15 +50,16 @@ type Engine struct {
 }
 
 type item struct {
-	t          *torrent.Torrent
-	source     string
-	paused     bool
-	verifying  bool
-	lastRead   int64
-	lastWrite  int64
-	lastSample time.Time
-	downRate   int64
-	upRate     int64
+	t           *torrent.Torrent
+	source      string
+	torrentFile string // .torrent in the download folder, if that is how it was added
+	paused      bool
+	verifying   bool
+	lastRead    int64
+	lastWrite   int64
+	lastSample  time.Time
+	downRate    int64
+	upRate      int64
 }
 
 func New(dataDir string) (*Engine, error) {
@@ -184,6 +187,9 @@ func (e *Engine) Add(input string) (string, error) {
 		t:          t,
 		source:     input,
 		lastSample: time.Now(),
+	}
+	if origin := downloadTorrentPath(input); origin != "" {
+		it.torrentFile = origin
 	}
 	e.items[id] = it
 
@@ -329,6 +335,7 @@ func (e *Engine) Delete(id string, removeFiles bool) error {
 		}
 	}
 
+	origin := it.torrentFile
 	it.t.Drop()
 	delete(e.items, id)
 	forgetTorrentState(e.dataDir, id)
@@ -340,6 +347,9 @@ func (e *Engine) Delete(id string, removeFiles bool) error {
 				return fmt.Errorf("wipe %s: %w", p, err)
 			}
 			_ = os.RemoveAll(p + ".part")
+		}
+		if err := removeMatchingTorrents(id, origin, watch.Dirs(e.dataDir)); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -370,6 +380,7 @@ func (e *Engine) sessionLocked() Session {
 		s.Torrents = append(s.Torrents, SessionTorrent{
 			Magnet: src,
 			Meta:   meta,
+			File:   it.torrentFile,
 			Paused: it.paused,
 			Name:   it.t.Name(),
 		})
@@ -495,6 +506,7 @@ func (e *Engine) RestoreSession(sess Session) {
 		if err != nil {
 			continue
 		}
+		e.noteTorrentFile(id, t.File)
 		if t.Paused {
 			_ = e.Pause(id)
 		}
@@ -525,6 +537,91 @@ func (e *Engine) RestoreIncompleteFromDisk() {
 		}
 		_, _ = e.Add("magnet:?xt=urn:btih:" + h)
 	}
+}
+
+// downloadTorrentPath is a user-facing .torrent, not the copy tuber keeps
+// under its config directory for resume.
+func downloadTorrentPath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || path == "." || isInternalMeta(path) || !fileLooksLikeTorrent(path) {
+		return ""
+	}
+	return path
+}
+
+func isInternalMeta(path string) bool {
+	dir, err := metaDir()
+	if err != nil {
+		return false
+	}
+	return filepath.Dir(filepath.Clean(path)) == filepath.Clean(dir)
+}
+
+func (e *Engine) noteTorrentFile(id, path string) {
+	path = downloadTorrentPath(path)
+	if path == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	it, ok := e.items[id]
+	if !ok || it.torrentFile != "" {
+		return
+	}
+	it.torrentFile = path
+	e.persistLocked()
+}
+
+// removeMatchingTorrents deletes the .torrent that was picked up from a
+// download folder, plus any other top-level .torrent in those folders with
+// the same infohash.
+func removeMatchingTorrents(infoHash, remembered string, dirs []string) error {
+	seen := map[string]struct{}{}
+	var doomed []string
+	add := func(p string) {
+		p = filepath.Clean(strings.TrimSpace(p))
+		if p == "" || isInternalMeta(p) || !fileLooksLikeTorrent(p) {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		doomed = append(doomed, p)
+	}
+	add(remembered)
+	want := strings.ToLower(strings.TrimSpace(infoHash))
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, ent := range entries {
+			if ent.IsDir() || !strings.HasSuffix(strings.ToLower(ent.Name()), ".torrent") {
+				continue
+			}
+			path := filepath.Join(dir, ent.Name())
+			got, err := fileInfoHash(path)
+			if err != nil || !strings.EqualFold(got, want) {
+				continue
+			}
+			add(path)
+		}
+	}
+	for _, p := range doomed {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("wipe %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+func fileInfoHash(path string) (string, error) {
+	mi, err := metainfo.LoadFromFile(path)
+	if err != nil {
+		return "", err
+	}
+	return mi.HashInfoBytes().HexString(), nil
 }
 
 func fileLooksLikeTorrent(path string) bool {

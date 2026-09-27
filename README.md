@@ -58,7 +58,7 @@ xdg-mime default tuber.desktop x-scheme-handler/magnet
 | `a` | Add magnet, `.torrent` path, or infohash |
 | `p` / `space` | Pause / resume |
 | `r` | Remove torrent (keep files) |
-| `w` | Wipe torrent and delete files |
+| `w` | Wipe torrent, its files, and the `.torrent` in Downloads |
 | `↑` / `↓` | Move selection |
 | `?` | Help |
 | `q` | Quit |
