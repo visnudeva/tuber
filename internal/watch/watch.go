@@ -111,7 +111,7 @@ func scanTorrentFiles(add Adder, note Notifier, st *State, dirs []string) {
 			}
 			id, err := add.Add(path)
 			if err != nil {
-				if strings.Contains(err.Error(), "already added") {
+				if quietAdd(err) {
 					st.files[path] = stmp
 					delete(st.errs, path)
 					continue
@@ -148,7 +148,7 @@ func scanClipboard(add Adder, note Notifier, st *State, text string) {
 	for _, magnet := range MagnetsIn(text) {
 		id, err := add.Add(magnet)
 		if err != nil {
-			if !strings.Contains(err.Error(), "already added") && note != nil {
+			if !quietAdd(err) && note != nil {
 				note.Set(err.Error())
 			}
 			continue
@@ -163,6 +163,14 @@ func scanClipboard(add Adder, note Notifier, st *State, text string) {
 		return
 	}
 	announce(note, fmt.Sprintf("added %d magnets from the clipboard", len(added)), added[len(added)-1])
+}
+
+func quietAdd(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "already added") || strings.Contains(msg, "wiped torrent")
 }
 
 // announce prefers a notifier that can also point the UI at the new torrent.

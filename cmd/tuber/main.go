@@ -84,7 +84,7 @@ func main() {
 		var added int
 		var last string
 		for _, a := range addArgs {
-			id, err := eng.Add(a)
+			id, err := eng.AddUser(a)
 			if err != nil {
 				if strings.Contains(err.Error(), "already added") {
 					notes.Set("already in list")
@@ -124,7 +124,7 @@ func main() {
 		}
 		eng.RestoreIncompleteFromDisk()
 		for _, arg := range args {
-			if _, err := eng.Add(arg); err != nil {
+			if _, err := eng.AddUser(arg); err != nil {
 				notes.Set(err.Error())
 			}
 		}

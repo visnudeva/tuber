@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,11 +44,16 @@ type Snapshot struct {
 	Source     string
 }
 
+// errWiped is returned when an automatic restore tries to add a torrent the
+// user already wiped. A deliberate add (the a prompt, a magnet open) clears it.
+var errWiped = errors.New("wiped torrent")
+
 type Engine struct {
 	mu      sync.Mutex
 	client  *torrent.Client
 	dataDir string
 	items   map[string]*item
+	wiped   map[string]struct{}
 }
 
 type item struct {
@@ -54,6 +61,7 @@ type item struct {
 	source      string
 	torrentFile string // .torrent in the download folder, if that is how it was added
 	paused      bool
+	dropped     bool
 	verifying   bool
 	lastRead    int64
 	lastWrite   int64
@@ -95,11 +103,16 @@ func New(dataDir string) (*Engine, error) {
 		return nil, fmt.Errorf("torrent client: %w", err)
 	}
 
-	return &Engine{
+	e := &Engine{
 		client:  client,
 		dataDir: dataDir,
 		items:   make(map[string]*item),
-	}, nil
+		wiped:   map[string]struct{}{},
+	}
+	if sess, err := LoadSession(); err == nil {
+		e.rememberWiped(sess.Wiped)
+	}
+	return e, nil
 }
 
 // migratePartFiles renames name.ext.part -> name.ext so existing downloads
@@ -138,7 +151,19 @@ func (e *Engine) Close() {
 
 func (e *Engine) DataDir() string { return e.dataDir }
 
+// Add enqueues a torrent. Wiped infohashes are refused so a later launch does
+// not bring them back from the session, the piece database, a leftover
+// .torrent, or a magnet still sitting on the clipboard.
 func (e *Engine) Add(input string) (string, error) {
+	return e.add(input, false)
+}
+
+// AddUser enqueues a torrent the user asked for and forgets a previous wipe.
+func (e *Engine) AddUser(input string) (string, error) {
+	return e.add(input, true)
+}
+
+func (e *Engine) add(input string, user bool) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", fmt.Errorf("empty input")
@@ -146,6 +171,10 @@ func (e *Engine) Add(input string) (string, error) {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if h := strings.ToLower(previewInfoHash(input)); h != "" && !user && e.isWiped(h) {
+		return h, errWiped
+	}
 
 	var (
 		t   *torrent.Torrent
@@ -178,7 +207,17 @@ func (e *Engine) Add(input string) (string, error) {
 		return "", err
 	}
 
-	id := t.InfoHash().HexString()
+	id := strings.ToLower(t.InfoHash().HexString())
+	if !user && e.isWiped(id) {
+		t.Drop()
+		return id, errWiped
+	}
+	if user {
+		delete(e.wiped, id)
+		if h := strings.ToLower(previewInfoHash(input)); h != "" {
+			delete(e.wiped, h)
+		}
+	}
 	if existing, ok := e.items[id]; ok {
 		return id, fmt.Errorf("already added: %s", existing.t.Name())
 	}
@@ -200,25 +239,118 @@ func (e *Engine) Add(input string) (string, error) {
 
 func (e *Engine) bootstrap(it *item) {
 	<-it.t.GotInfo()
+	if !e.stillHere(it) {
+		return
+	}
 	_ = saveMetainfo(it.t)
+	if !e.stillHere(it) {
+		_ = os.Remove(localMetaPath(it.t.InfoHash().HexString()))
+		return
+	}
 
 	e.mu.Lock()
+	if it.dropped {
+		e.mu.Unlock()
+		_ = os.Remove(localMetaPath(it.t.InfoHash().HexString()))
+		return
+	}
 	paused := it.paused
 	it.source = magnetFor(it.t)
 	it.verifying = true
 	e.persistLocked()
 	e.mu.Unlock()
 
+	if !e.stillHere(it) {
+		return
+	}
 	// Re-hash bytes already on disk so incomplete-session data becomes counted progress.
 	_ = it.t.VerifyData()
 
 	e.mu.Lock()
+	if it.dropped {
+		e.mu.Unlock()
+		return
+	}
 	it.verifying = false
 	e.persistLocked()
 	e.mu.Unlock()
 
-	if !paused {
+	if !paused && e.stillHere(it) {
 		it.t.DownloadAll()
+	}
+}
+
+func (e *Engine) stillHere(it *item) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if it == nil || it.dropped || it.t == nil {
+		return false
+	}
+	id := strings.ToLower(it.t.InfoHash().HexString())
+	return e.items[id] == it
+}
+
+func (e *Engine) rememberWiped(hashes []string) {
+	if e.wiped == nil {
+		e.wiped = map[string]struct{}{}
+	}
+	for _, h := range hashes {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h != "" {
+			e.wiped[h] = struct{}{}
+		}
+	}
+}
+
+func (e *Engine) isWiped(id string) bool {
+	if e.wiped == nil {
+		return false
+	}
+	_, ok := e.wiped[strings.ToLower(strings.TrimSpace(id))]
+	return ok
+}
+
+func (e *Engine) tombstone(id string) {
+	if e.wiped == nil {
+		e.wiped = map[string]struct{}{}
+	}
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id != "" {
+		e.wiped[id] = struct{}{}
+	}
+}
+
+func (e *Engine) wipedSlice() []string {
+	if len(e.wiped) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(e.wiped))
+	for h := range e.wiped {
+		out = append(out, h)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func previewInfoHash(input string) string {
+	input = strings.TrimSpace(input)
+	switch {
+	case strings.HasPrefix(input, "magnet:"):
+		spec, err := torrent.TorrentSpecFromMagnetUri(input)
+		if err != nil {
+			return ""
+		}
+		return spec.InfoHash.HexString()
+	case fileLooksLikeTorrent(input):
+		h, err := fileInfoHash(input)
+		if err != nil {
+			return ""
+		}
+		return h
+	case looksLikeInfoHash(input):
+		return strings.TrimPrefix(strings.ToLower(input), "0x")
+	default:
+		return ""
 	}
 }
 
@@ -336,8 +468,13 @@ func (e *Engine) Delete(id string, removeFiles bool) error {
 	}
 
 	origin := it.torrentFile
+	it.dropped = true
 	it.t.Drop()
+	delete(e.items, strings.ToLower(id))
 	delete(e.items, id)
+	if removeFiles {
+		e.tombstone(id)
+	}
 	forgetTorrentState(e.dataDir, id)
 	e.persistLocked()
 
@@ -367,7 +504,7 @@ func (e *Engine) persistLocked() error {
 }
 
 func (e *Engine) sessionLocked() Session {
-	s := Session{DataDir: e.dataDir}
+	s := Session{DataDir: e.dataDir, Wiped: e.wipedSlice()}
 	for id, it := range e.items {
 		src := it.source
 		if !strings.HasPrefix(src, "magnet:") {

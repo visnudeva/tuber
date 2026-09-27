@@ -155,7 +155,7 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if val == "" {
 			return m, m.setSticky("nothing to add")
 		}
-		id, err := m.eng.Add(val)
+		id, err := m.eng.AddUser(val)
 		if err != nil {
 			m.errFlash = err.Error()
 			return m, m.setSticky("add failed")

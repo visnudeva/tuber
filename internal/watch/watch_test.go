@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,25 @@ func TestScanTorrentFilesTopLevelOnly(t *testing.T) {
 	scanTorrentFiles(add, note, st, []string{dir})
 	if len(add.calls) != 1 {
 		t.Fatalf("rescanned: %#v", add.calls)
+	}
+}
+
+func TestWipedTorrentStaysQuiet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "movie.torrent")
+	if err := os.WriteFile(path, []byte("d8:announce0:e"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	add := &fakeAdd{fail: map[string]error{path: errors.New("wiped torrent")}}
+	note := &fakeNote{}
+	st := &State{}
+	scanTorrentFiles(add, note, st, []string{dir})
+	scanTorrentFiles(add, note, st, []string{dir})
+	if len(add.calls) != 1 {
+		t.Fatalf("calls %#v", add.calls)
+	}
+	if len(note.msgs) != 0 {
+		t.Fatalf("notes %#v", note.msgs)
 	}
 }
 

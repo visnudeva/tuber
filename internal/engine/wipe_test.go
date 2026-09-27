@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,5 +61,66 @@ func TestRemoveMatchingTorrentsDeletesDownloadCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("unrelated file removed: %v", err)
+	}
+}
+
+func TestWipeIsNotRestoredOnNextLaunch(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	downloads := t.TempDir()
+	path, hash := writeTorrent(t, downloads, "movie.torrent")
+
+	eng, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	id, err := eng.Add(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Delete(id, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("download-folder torrent still present: %v", err)
+	}
+
+	sess, err := LoadSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.Torrents) != 0 {
+		t.Fatalf("session still has torrents: %+v", sess.Torrents)
+	}
+	if len(sess.Wiped) != 1 || sess.Wiped[0] != hash {
+		t.Fatalf("wiped list %#v, hash %s", sess.Wiped, hash)
+	}
+
+	next, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	next.RestoreSession(sess)
+	if _, err := next.Add(path); !errors.Is(err, errWiped) {
+		// The file is gone; a magnet with the same hash must also stay wiped.
+		magnet := "magnet:?xt=urn:btih:" + hash
+		if _, err = next.Add(magnet); !errors.Is(err, errWiped) {
+			t.Fatalf("restored wiped torrent: %v", err)
+		}
+	}
+	if got := next.Snapshots(); len(got) != 0 {
+		t.Fatalf("snapshots after restore: %+v", got)
+	}
+
+	if _, err := next.AddUser("magnet:?xt=urn:btih:" + hash); err != nil {
+		t.Fatal(err)
+	}
+	if !next.isWiped(hash) && len(next.Snapshots()) != 1 {
+		t.Fatalf("deliberate add did not return the torrent")
+	}
+	if next.isWiped(hash) {
+		t.Fatal("deliberate add left the wipe in place")
 	}
 }

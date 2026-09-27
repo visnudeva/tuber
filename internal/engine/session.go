@@ -21,6 +21,9 @@ type SessionTorrent struct {
 type Session struct {
 	DataDir  string           `json:"data_dir,omitempty"`
 	Torrents []SessionTorrent `json:"torrents,omitempty"`
+	// Wiped infohashes must not be restored from session, disk, the download
+	// folder, or the clipboard.
+	Wiped []string `json:"wiped,omitempty"`
 	// Sources is legacy (magnet/infohash strings only).
 	Sources []string `json:"sources,omitempty"`
 }
