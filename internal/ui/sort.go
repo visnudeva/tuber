@@ -12,6 +12,7 @@ const (
 	sortByName sortKey = iota
 	sortByDone
 	sortByStatus
+	sortBySize
 	sortByDown
 	sortByUp
 	sortByETA
@@ -23,6 +24,7 @@ var sortCycle = []sortKey{
 	sortByName,
 	sortByDone,
 	sortByStatus,
+	sortBySize,
 	sortByDown,
 	sortByUp,
 	sortByETA,
@@ -35,6 +37,8 @@ func (k sortKey) label() string {
 		return "done"
 	case sortByStatus:
 		return "status"
+	case sortBySize:
+		return "size"
 	case sortByDown:
 		return "down"
 	case sortByUp:
@@ -80,7 +84,13 @@ func compareBy(key sortKey, a, b engine.Snapshot) int {
 	case sortByDone:
 		return cmpFloatDesc(a.Progress, b.Progress)
 	case sortByStatus:
-		return cmpIntAsc(statusRank(a.Status), statusRank(b.Status))
+		if c := cmpIntAsc(statusRank(a.Status), statusRank(b.Status)); c != 0 {
+			return c
+		}
+		// Same status: higher progress first so the group does not look size-ordered.
+		return cmpFloatDesc(a.Progress, b.Progress)
+	case sortBySize:
+		return cmpInt64Desc(a.BytesTotal, b.BytesTotal)
 	case sortByDown:
 		return cmpInt64Desc(a.DownRate, b.DownRate)
 	case sortByUp:

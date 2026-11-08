@@ -80,6 +80,8 @@ type Model struct {
 	lastNotice   string
 	lastFocus    string
 	sortBy       sortKey
+	notify       bool
+	prevStatus   map[string]engine.Status
 }
 
 func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
@@ -88,11 +90,13 @@ func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
 	ti.CharLimit = 2048
 	ti.Width = 72
 	return Model{
-		eng:       eng,
-		notes:     notes,
-		input:     ti,
-		status:    "ready",
-		watchDirs: watchDirs,
+		eng:        eng,
+		notes:      notes,
+		input:      ti,
+		status:     "ready",
+		watchDirs:  watchDirs,
+		notify:     loadNotifyPref(),
+		prevStatus: make(map[string]engine.Status),
 	}
 }
 
@@ -114,6 +118,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.refreshSnaps()
+		m.checkCompletions()
 		extra := m.takeNotice()
 		m.expireNotice()
 		return m, tea.Batch(tick(), extra)
@@ -198,6 +203,13 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sortSnaps()
 		m.selectID(id)
 		return m, m.holdStatus("sort by " + m.sortBy.label())
+	case "n", "N":
+		m.notify = !m.notify
+		saveNotifyPref(m.notify)
+		if m.notify {
+			return m, m.holdStatus("notifications on")
+		}
+		return m, m.holdStatus("notifications off")
 	case "p", " ":
 		if id, ok := m.selectedID(); ok {
 			paused, err := m.eng.TogglePause(id)
@@ -239,7 +251,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "?":
-		return m, m.holdStatus("a add · s sort · p/space pause · r remove · w wipe · q quit · ? help · ↑/↓ move")
+		return m, m.holdStatus("a add · p/space pause · s sort · r remove · w wipe · q quit · n notify · ? help · ↑/↓ move")
 	}
 	return m, nil
 }
@@ -435,11 +447,12 @@ func formatKeyHints() string {
 	label := func(s string) string { return dimStyle.Render(s) }
 	return strings.Join([]string{
 		key("a") + label(" add"),
-		key("s") + label(" sort"),
 		key("p") + label(" pause/play"),
+		key("s") + label(" sort"),
 		key("r") + label(" remove"),
 		key("w") + label(" wipe"),
 		key("q") + label(" quit"),
+		key("n") + label(" notify"),
 		key("?") + label(" help"),
 		key("↑") + label("/") + key("↓"),
 	}, sep)
@@ -460,7 +473,7 @@ func formatHeader(active sortKey) string {
 	return joinCols(
 		headerCol("done", colDone, false, active == sortByDone),
 		headerCol("status", colStatus, false, active == sortByStatus),
-		headerCol("size", colSize, true, false),
+		headerCol("size", colSize, true, active == sortBySize),
 		headerCol("down", colRate, true, active == sortByDown),
 		headerCol("up", colRate, true, active == sortByUp),
 		headerCol("eta", colETA, true, active == sortByETA),

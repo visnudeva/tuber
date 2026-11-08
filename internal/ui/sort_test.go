@@ -9,13 +9,27 @@ import (
 func TestCycleSortOrder(t *testing.T) {
 	m := New(nil, nil, nil)
 	want := []sortKey{
-		sortByDone, sortByStatus, sortByDown, sortByUp, sortByETA, sortByPeers, sortByName,
+		sortByDone, sortByStatus, sortBySize, sortByDown, sortByUp, sortByETA, sortByPeers, sortByName,
 	}
 	for i, k := range want {
 		m.cycleSort()
 		if m.sortBy != k {
 			t.Fatalf("step %d: got %v want %v", i, m.sortBy, k)
 		}
+	}
+}
+
+func TestSortBySizeDescending(t *testing.T) {
+	m := New(nil, nil, nil)
+	m.sortBy = sortBySize
+	m.snaps = []engine.Snapshot{
+		{ID: "a", Name: "a", BytesTotal: 100},
+		{ID: "b", Name: "b", BytesTotal: 900},
+		{ID: "c", Name: "c", BytesTotal: 400},
+	}
+	m.sortSnaps()
+	if m.snaps[0].ID != "b" || m.snaps[1].ID != "c" || m.snaps[2].ID != "a" {
+		t.Fatalf("order %+v", ids(m.snaps))
 	}
 }
 
@@ -70,14 +84,15 @@ func TestSortByStatusPriority(t *testing.T) {
 	m := New(nil, nil, nil)
 	m.sortBy = sortByStatus
 	m.snaps = []engine.Snapshot{
-		{ID: "done", Name: "z", Status: engine.StatusDone},
-		{ID: "active", Name: "a", Status: engine.StatusActive},
+		{ID: "done", Name: "z", Status: engine.StatusDone, Progress: 1},
+		{ID: "active-low", Name: "a", Status: engine.StatusActive, Progress: 0.1},
+		{ID: "active-high", Name: "b", Status: engine.StatusActive, Progress: 0.9},
 		{ID: "paused", Name: "p", Status: engine.StatusPaused},
 		{ID: "meta", Name: "m", Status: engine.StatusFetching},
 	}
 	m.sortSnaps()
 	got := ids(m.snaps)
-	want := []string{"active", "meta", "paused", "done"}
+	want := []string{"active-high", "active-low", "meta", "paused", "done"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order %+v want %+v", got, want)
