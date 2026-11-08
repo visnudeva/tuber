@@ -441,7 +441,7 @@ func formatKeyHints() string {
 		key("w") + label(" wipe"),
 		key("q") + label(" quit"),
 		key("?") + label(" help"),
-		label("↑/↓"),
+		key("↑") + label("/") + key("↓"),
 	}, sep)
 }
 
