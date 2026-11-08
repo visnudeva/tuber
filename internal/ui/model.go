@@ -416,10 +416,11 @@ func (m Model) View() string {
 		b.WriteString(dimStyle.Render("no torrents yet — drop a .torrent in Downloads, copy a magnet, or press a"))
 		b.WriteString("\n\n")
 	} else {
+		nameWidth := nameWidthFor(m.width)
 		b.WriteString("  " + formatHeader(m.sortBy))
 		b.WriteString("\n")
 		for i, s := range m.snaps {
-			line := formatRow(s)
+			line := formatRow(s, nameWidth)
 			if i == m.cursor {
 				b.WriteString(selStyle.Render("▸ " + stripANSI(line)))
 			} else {
@@ -467,6 +468,9 @@ const (
 	colRate   = 8
 	colETA    = 8
 	colPeers  = 7
+
+	// Indent ("  "/"▸ ") + fixed columns + "  " gaps before the name field.
+	rowBeforeName = 2 + colDone + 2 + colStatus + 2 + colSize + 2 + colRate + 2 + colRate + 2 + colETA + 2 + colPeers + 2
 )
 
 func formatHeader(active sortKey) string {
@@ -502,16 +506,47 @@ func headerName(active bool) string {
 	return headerStyle.Render("name")
 }
 
-func formatRow(s engine.Snapshot) string {
+// nameWidthFor is how many runes the name column may use for this terminal.
+func nameWidthFor(termWidth int) int {
+	if termWidth <= 0 {
+		return 48
+	}
+	w := termWidth - rowBeforeName
+	if w < 8 {
+		return 8
+	}
+	return w
+}
+
+func truncateName(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if n >= max-1 {
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	b.WriteRune('…')
+	return b.String()
+}
+
+func formatRow(s engine.Snapshot, nameWidth int) string {
 	pct := fmt.Sprintf("%5.1f%%", s.Progress*100)
 	size := humanBytes(s.BytesTotal)
 	if !s.InfoReady {
 		size = "—"
 		pct = "—"
-	}
-	name := s.Name
-	if len(name) > 48 {
-		name = name[:45] + "…"
 	}
 	peers := fmt.Sprintf("%d/%d", s.Peers, s.TotalPeers)
 	return joinCols(
@@ -522,7 +557,7 @@ func formatRow(s engine.Snapshot) string {
 		padLeft(humanRate(s.UpRate), colRate),
 		padLeft(formatETA(s), colETA),
 		padRight(peers, colPeers),
-		name,
+		truncateName(s.Name, nameWidth),
 	)
 }
 
