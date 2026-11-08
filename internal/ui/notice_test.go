@@ -47,8 +47,9 @@ func TestAddedNoticeReturnsToFocusedTorrent(t *testing.T) {
 	if m.status != "added .torrent file from the download folder" {
 		t.Fatalf("second notice %q", m.status)
 	}
-	if m.cursor != 1 {
-		t.Fatalf("cursor %d", m.cursor)
+	// Name sort puts "Movie" before "Ubuntu ISO".
+	if m.cursor != 0 || m.snaps[m.cursor].ID != "def" {
+		t.Fatalf("cursor %d id %q", m.cursor, m.snaps[m.cursor].ID)
 	}
 }
 

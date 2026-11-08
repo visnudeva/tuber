@@ -79,6 +79,7 @@ type Model struct {
 	noticeGen    int
 	lastNotice   string
 	lastFocus    string
+	sortBy       sortKey
 }
 
 func New(eng *engine.Engine, notes *Notes, watchDirs []string) Model {
@@ -112,15 +113,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if m.eng != nil {
-			m.snaps = m.eng.Snapshots()
-		}
-		if m.cursor >= len(m.snaps) && len(m.snaps) > 0 {
-			m.cursor = len(m.snaps) - 1
-		}
-		if len(m.snaps) == 0 {
-			m.cursor = 0
-		}
+		m.refreshSnaps()
 		extra := m.takeNotice()
 		m.expireNotice()
 		return m, tea.Batch(tick(), extra)
@@ -161,7 +154,7 @@ func (m Model) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.holdStatus("add failed")
 		}
 		m.errFlash = ""
-		m.snaps = m.eng.Snapshots()
+		m.refreshSnaps()
 		m.selectID(id)
 		return m, m.holdStatus("added " + short(id))
 	}
@@ -199,6 +192,12 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = len(m.snaps) - 1
 		}
 		m.followFocus()
+	case "s", "S":
+		id, _ := m.selectedID()
+		m.cycleSort()
+		m.sortSnaps()
+		m.selectID(id)
+		return m, m.holdStatus("sort by " + m.sortBy.label())
 	case "p", " ":
 		if id, ok := m.selectedID(); ok {
 			paused, err := m.eng.TogglePause(id)
@@ -206,7 +205,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.snaps = m.eng.Snapshots()
+				m.refreshSnaps()
 				if paused {
 					return m, m.holdStatus("paused")
 				}
@@ -219,7 +218,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.snaps = m.eng.Snapshots()
+				m.refreshSnaps()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
 				}
@@ -232,7 +231,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errFlash = err.Error()
 			} else {
 				m.errFlash = ""
-				m.snaps = m.eng.Snapshots()
+				m.refreshSnaps()
 				if m.cursor >= len(m.snaps) && m.cursor > 0 {
 					m.cursor--
 				}
@@ -240,9 +239,28 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "?":
-		return m, m.holdStatus("a add · p/space pause · r remove · w wipe · ↑/↓ move · q quit")
+		return m, m.holdStatus("a add · s sort · p/space pause · r remove · w wipe · q quit · ? help · ↑/↓ move")
 	}
 	return m, nil
+}
+
+// refreshSnaps pulls engine state, keeps the selected torrent under the cursor,
+// and applies the active sort.
+func (m *Model) refreshSnaps() {
+	id, _ := m.selectedID()
+	if m.eng != nil {
+		m.snaps = m.eng.Snapshots()
+	}
+	m.sortSnaps()
+	if id != "" {
+		m.selectID(id)
+	}
+	if m.cursor >= len(m.snaps) && len(m.snaps) > 0 {
+		m.cursor = len(m.snaps) - 1
+	}
+	if len(m.snaps) == 0 {
+		m.cursor = 0
+	}
 }
 
 func (m *Model) takeNotice() tea.Cmd {
@@ -386,7 +404,7 @@ func (m Model) View() string {
 		b.WriteString(dimStyle.Render("no torrents yet — drop a .torrent in Downloads, copy a magnet, or press a"))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(headerStyle.Render("  " + formatHeader()))
+		b.WriteString("  " + formatHeader(m.sortBy))
 		b.WriteString("\n")
 		for i, s := range m.snaps {
 			line := formatRow(s)
@@ -406,8 +424,25 @@ func (m Model) View() string {
 	}
 	b.WriteString(dimStyle.Render(m.status))
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("a add  p pause/play  r remove  w wipe  ↑/↓  ? help  q quit"))
+	b.WriteString(formatKeyHints())
 	return b.String()
+}
+
+// formatKeyHints paints each bound letter in potato orange; q sits after wipe.
+func formatKeyHints() string {
+	key := func(s string) string { return titleStyle.Render(s) }
+	sep := dimStyle.Render("  ")
+	label := func(s string) string { return dimStyle.Render(s) }
+	return strings.Join([]string{
+		key("a") + label(" add"),
+		key("s") + label(" sort"),
+		key("p") + label(" pause/play"),
+		key("r") + label(" remove"),
+		key("w") + label(" wipe"),
+		key("q") + label(" quit"),
+		key("?") + label(" help"),
+		label("↑/↓"),
+	}, sep)
 }
 
 // Column widths must match between header and rows. Status is padded to
@@ -421,17 +456,37 @@ const (
 	colPeers  = 7
 )
 
-func formatHeader() string {
+func formatHeader(active sortKey) string {
 	return joinCols(
-		padRight("done", colDone),
-		padRight("status", colStatus),
-		padLeft("size", colSize),
-		padLeft("down", colRate),
-		padLeft("up", colRate),
-		padLeft("eta", colETA),
-		padRight("peers", colPeers),
-		"name",
+		headerCol("done", colDone, false, active == sortByDone),
+		headerCol("status", colStatus, false, active == sortByStatus),
+		headerCol("size", colSize, true, false),
+		headerCol("down", colRate, true, active == sortByDown),
+		headerCol("up", colRate, true, active == sortByUp),
+		headerCol("eta", colETA, true, active == sortByETA),
+		headerCol("peers", colPeers, false, active == sortByPeers),
+		headerName(active == sortByName),
 	)
+}
+
+func headerCol(label string, width int, left bool, active bool) string {
+	var cell string
+	if left {
+		cell = padLeft(label, width)
+	} else {
+		cell = padRight(label, width)
+	}
+	if active {
+		return titleStyle.Render(cell)
+	}
+	return headerStyle.Render(cell)
+}
+
+func headerName(active bool) string {
+	if active {
+		return titleStyle.Render("name")
+	}
+	return headerStyle.Render("name")
 }
 
 func formatRow(s engine.Snapshot) string {
