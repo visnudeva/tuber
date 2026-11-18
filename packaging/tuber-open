@@ -30,8 +30,8 @@ def clamp(n, lo, hi):
 def from_dpi(dpi, scale=1.0):
     if scale <= 0:
         scale = 1.0
-    # ~12pt visual size at 96 DPI (11pt system fonts read tiny on ~140 DPI panels).
-    return clamp(round(12 * (dpi / 96.0) / scale), 13, 20)
+    # ~10pt visual size at 96 DPI — between the old tiny defaults and a full 12pt.
+    return clamp(round(10 * (dpi / 96.0) / scale), 12, 18)
 
 w = h = mm_w = None
 scale = 1.0
@@ -79,11 +79,11 @@ elif h:
     if h >= 2160:
         print(from_dpi(160, scale))
     elif h >= 1440:
-        print(15)
-    else:
         print(14)
+    else:
+        print(13)
 else:
-    print(14)
+    print(13)
 PY
     return
   fi
