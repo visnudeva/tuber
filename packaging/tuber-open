@@ -30,8 +30,8 @@ def clamp(n, lo, hi):
 def from_dpi(dpi, scale=1.0):
     if scale <= 0:
         scale = 1.0
-    # ~10pt visual size at 96 DPI — between the old tiny defaults and a full 12pt.
-    return clamp(round(10 * (dpi / 96.0) / scale), 12, 18)
+    # ~9.4pt visual size at 96 DPI (~14pt on a 140 DPI 1080p panel).
+    return clamp(round(9.4 * (dpi / 96.0) / scale), 12, 18)
 
 w = h = mm_w = None
 scale = 1.0
@@ -81,9 +81,9 @@ elif h:
     elif h >= 1440:
         print(14)
     else:
-        print(13)
+        print(14)
 else:
-    print(13)
+    print(14)
 PY
     return
   fi
