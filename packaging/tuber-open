@@ -72,6 +72,24 @@ if w is None and shutil.which("hyprctl"):
     except Exception:
         pass
 
+# SweetPotatOs / Swirl (swaymsg JSON).
+if w is None and shutil.which("swaymsg"):
+    try:
+        outs = json.loads(subprocess.check_output(
+            ["swaymsg", "-t", "get_outputs"], text=True))
+        focused = [o for o in outs if o.get("focused")] or outs
+        if focused:
+            o = focused[0]
+            rect = o.get("rect") or {}
+            w, h = rect.get("width"), rect.get("height")
+            scale = float(o.get("scale") or 1)
+            # physical size is mm as [width, height] when present
+            ps = o.get("physical_size")  # not always set
+            if not ps and o.get("width_mm"):
+                mm_w = o.get("width_mm")
+    except Exception:
+        pass
+
 if w and mm_w:
     print(from_dpi(w / (mm_w / 25.4), scale))
 elif h:
@@ -95,15 +113,41 @@ DIR="${HOME}/Downloads/tuber"
 mkdir -p "$DIR"
 
 # Mark the child so a nested `tuber` does not wrap again (see cmd/tuber).
-# Prefer kitty (Ryoku default) so tuber keeps the desktop monospace face;
-# foot's packaged default is size 8 and reads tiny on 1080p.
-if command -v kitty >/dev/null 2>&1; then
-  exec kitty --title tuber -d "$DIR" -o "font_size=${FONT}" \
-    env TUBER_SCALED=1 "$BIN" "$@"
+# SweetPotatOs ships foot as $term — prefer it there. Elsewhere prefer kitty
+# (Ryoku) so we keep the desktop monospace face; bare foot defaults to size 8.
+use_foot_first=0
+if [ -n "${TUBER_TERM:-}" ]; then
+  :
+elif [ -x /usr/bin/sweetpotatos-update ] || [ -f /usr/share/sweetpotatos/update-news ]; then
+  use_foot_first=1
 fi
-if command -v foot >/dev/null 2>&1; then
+
+run_foot() {
   exec env TUBER_SCALED=1 foot -T tuber -a tuber -D "$DIR" \
     -f "monospace:size=${FONT}" -e "$BIN" "$@"
+}
+run_kitty() {
+  exec kitty --title tuber -d "$DIR" -o "font_size=${FONT}" \
+    env TUBER_SCALED=1 "$BIN" "$@"
+}
+
+if [ -n "${TUBER_TERM:-}" ]; then
+  exec env TUBER_SCALED=1 "$TUBER_TERM" -e "$BIN" "$@"
+fi
+if [ "$use_foot_first" = 1 ]; then
+  if command -v foot >/dev/null 2>&1; then
+    run_foot "$@"
+  fi
+  if command -v kitty >/dev/null 2>&1; then
+    run_kitty "$@"
+  fi
+else
+  if command -v kitty >/dev/null 2>&1; then
+    run_kitty "$@"
+  fi
+  if command -v foot >/dev/null 2>&1; then
+    run_foot "$@"
+  fi
 fi
 if command -v xdg-terminal-exec >/dev/null 2>&1; then
   exec env TUBER_SCALED=1 xdg-terminal-exec "$BIN" "$@"

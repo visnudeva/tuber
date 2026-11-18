@@ -152,11 +152,18 @@ func shortID(id string) string {
 // wrapIntoScaledTerminal re-execs through tuber-open so the TUI is not stuck at
 // a tiny default terminal font on high-DPI 1080p panels. Returns true when this
 // process should exit (child window owns the session).
+//
+// Skipped when already inside a dedicated terminal (e.g. SweetPotatOs
+// `foot -T tuber -e tuber` / Mod+t): wrapping would exit that foot and the
+// replacement often dies with SIGHUP before it appears.
 func wrapIntoScaledTerminal(args []string) bool {
 	if os.Getenv("TUBER_INLINE") != "" || os.Getenv("TUBER_SCALED") != "" {
 		return false
 	}
 	if os.Getenv("WAYLAND_DISPLAY") == "" && os.Getenv("DISPLAY") == "" {
+		return false
+	}
+	if launchedFromDedicatedTerminal() {
 		return false
 	}
 	open, err := exec.LookPath("tuber-open")
@@ -169,14 +176,36 @@ func wrapIntoScaledTerminal(args []string) bool {
 	}
 	cmd := exec.Command(open, args...)
 	cmd.Env = append(os.Environ(), "TUBER_BIN="+self)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	// Detach from the calling tty/session so a shell/foot exit cannot SIGHUP us.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
 		return false
 	}
 	_ = cmd.Process.Release()
 	return true
+}
+
+// launchedFromDedicatedTerminal is true when our parent is a terminal emulator
+// whose argv already mentions tuber (keybind / desktop: `$term -e tuber`).
+func launchedFromDedicatedTerminal() bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", os.Getppid()))
+	if err != nil || len(data) == 0 {
+		return false
+	}
+	parts := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+	if len(parts) == 0 {
+		return false
+	}
+	switch filepath.Base(parts[0]) {
+	case "foot", "footclient", "kitty", "alacritty", "wezterm", "ghostty",
+		"xdg-terminal-exec", "gnome-terminal", "kgx":
+	default:
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.Join(parts, " ")), "tuber")
 }
 
 func focusTuberWindow() bool {
