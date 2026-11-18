@@ -53,6 +53,12 @@ func main() {
 	// swaymsg can report success even when no window matched, which made
 	// `tuber` in a terminal appear to do nothing on SweetPotatOs.
 
+	// On a graphical session, open a dedicated terminal whose font tracks the
+	// display DPI (tuber-open). Stay in the current tty with TUBER_INLINE=1.
+	if wrapIntoScaledTerminal(args) {
+		return
+	}
+
 	eng, err := engine.New(*dataDir)
 	if err != nil {
 		fatalWait("tuber: %v", err)
@@ -141,6 +147,36 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:8]
+}
+
+// wrapIntoScaledTerminal re-execs through tuber-open so the TUI is not stuck at
+// a tiny default terminal font on high-DPI 1080p panels. Returns true when this
+// process should exit (child window owns the session).
+func wrapIntoScaledTerminal(args []string) bool {
+	if os.Getenv("TUBER_INLINE") != "" || os.Getenv("TUBER_SCALED") != "" {
+		return false
+	}
+	if os.Getenv("WAYLAND_DISPLAY") == "" && os.Getenv("DISPLAY") == "" {
+		return false
+	}
+	open, err := exec.LookPath("tuber-open")
+	if err != nil {
+		return false
+	}
+	self, err := os.Executable()
+	if err != nil {
+		self = "tuber"
+	}
+	cmd := exec.Command(open, args...)
+	cmd.Env = append(os.Environ(), "TUBER_BIN="+self)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	_ = cmd.Process.Release()
+	return true
 }
 
 func focusTuberWindow() bool {

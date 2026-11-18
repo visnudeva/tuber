@@ -1,6 +1,9 @@
 #!/bin/sh
 # Open tuber in a terminal (needed for TUI + xdg-open / magnet clicks).
 # Magnets hand off to a running session; a bare launch always opens the TUI.
+#
+# Font size tracks the active display (DPI when known, else resolution) so a
+# 1080p laptop panel is readable without touching the user's default terminal.
 BIN="${TUBER_BIN:-tuber}"
 
 if [ "$#" -gt 0 ]; then
@@ -11,14 +14,98 @@ if [ "$#" -gt 0 ]; then
   fi
 fi
 
-# foot: trailing args are the command; -e is ignored (xterm compat). Match Spore's style.
-if command -v foot >/dev/null 2>&1; then
-  exec foot -T tuber -a tuber -e "$BIN" "$@"
-fi
+# Points, clamped. Override with TUBER_FONT_SIZE=N.
+tuber_font_size() {
+  if [ -n "${TUBER_FONT_SIZE:-}" ]; then
+    printf '%s\n' "$TUBER_FONT_SIZE"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import json, os, shutil, subprocess
+
+def clamp(n, lo, hi):
+    return max(lo, min(hi, n))
+
+def from_dpi(dpi, scale=1.0):
+    if scale <= 0:
+        scale = 1.0
+    # ~12pt visual size at 96 DPI (11pt system fonts read tiny on ~140 DPI panels).
+    return clamp(round(12 * (dpi / 96.0) / scale), 13, 20)
+
+w = h = mm_w = None
+scale = 1.0
+
+if os.environ.get("NIRI_SOCKET") and shutil.which("niri"):
+    try:
+        outs = json.loads(subprocess.check_output(
+            ["niri", "msg", "-j", "outputs"], text=True))
+        best = None
+        for o in outs.values():
+            log = o.get("logical") or {}
+            area = (log.get("width") or 0) * (log.get("height") or 0)
+            if best is None or area > best[0]:
+                best = (area, o)
+        if best:
+            o = best[1]
+            log = o.get("logical") or {}
+            w, h = log.get("width"), log.get("height")
+            scale = float(log.get("scale") or 1)
+            ps = o.get("physical_size") or [0, 0]
+            if ps and ps[0]:
+                mm_w = ps[0]
+    except Exception:
+        pass
+
+if w is None and shutil.which("hyprctl"):
+    try:
+        mons = json.loads(subprocess.check_output(
+            ["hyprctl", "monitors", "-j"], text=True))
+        mons = sorted(
+            mons,
+            key=lambda m: (not m.get("focused"), -(m.get("width") or 0)),
+        )
+        if mons:
+            m = mons[0]
+            w, h = m.get("width"), m.get("height")
+            scale = float(m.get("scale") or 1)
+    except Exception:
+        pass
+
+if w and mm_w:
+    print(from_dpi(w / (mm_w / 25.4), scale))
+elif h:
+    # No physical size: coarse ladder by logical height.
+    if h >= 2160:
+        print(from_dpi(160, scale))
+    elif h >= 1440:
+        print(15)
+    else:
+        print(14)
+else:
+    print(14)
+PY
+    return
+  fi
+  printf '14\n'
+}
+
+FONT="$(tuber_font_size)"
+DIR="${HOME}/Downloads/tuber"
+mkdir -p "$DIR"
+
+# Mark the child so a nested `tuber` does not wrap again (see cmd/tuber).
+# Prefer kitty (Ryoku default) so tuber keeps the desktop monospace face;
+# foot's packaged default is size 8 and reads tiny on 1080p.
 if command -v kitty >/dev/null 2>&1; then
-  exec kitty --title tuber -d "${HOME}/Downloads/tuber" "$BIN" "$@"
+  exec kitty --title tuber -d "$DIR" -o "font_size=${FONT}" \
+    env TUBER_SCALED=1 "$BIN" "$@"
+fi
+if command -v foot >/dev/null 2>&1; then
+  exec env TUBER_SCALED=1 foot -T tuber -a tuber -D "$DIR" \
+    -f "monospace:size=${FONT}" -e "$BIN" "$@"
 fi
 if command -v xdg-terminal-exec >/dev/null 2>&1; then
-  exec xdg-terminal-exec "$BIN" "$@"
+  exec env TUBER_SCALED=1 xdg-terminal-exec "$BIN" "$@"
 fi
-exec "$BIN" "$@"
+exec env TUBER_SCALED=1 "$BIN" "$@"

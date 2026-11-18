@@ -28,7 +28,22 @@ Or from source:
 ```bash
 git clone https://github.com/visnudeva/tuber.git
 cd tuber
-go build -o tuber ./cmd/tuber
+go build -o ~/.local/bin/tuber ./cmd/tuber
+```
+
+## Update
+
+```bash
+go install github.com/visnudeva/tuber/cmd/tuber@latest
+```
+
+From a source checkout:
+
+```bash
+git pull
+go build -o ~/.local/bin/tuber ./cmd/tuber
+# magnet / desktop launcher (font scales to the display):
+cp packaging/tuber-open ~/.local/bin/
 ```
 
 ## Run
@@ -37,6 +52,8 @@ go build -o tuber ./cmd/tuber
 tuber
 tuber -dir ~/Downloads/tuber 'magnet:?xt=urn:btih:…'
 ```
+
+On a graphical desktop, `tuber` opens in its own terminal with a font sized for the display (`tuber-open`). Use `TUBER_INLINE=1` to stay in the current terminal, or `TUBER_FONT_SIZE=N` to override the size.
 
 Downloads default to `~/Downloads/tuber`. Open magnets are restored from `~/.config/tuber/session.json` on the next launch.
 
